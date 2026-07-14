@@ -1,5 +1,4 @@
 import { GoogleGenAI, Modality, type LiveServerMessage, type Session } from '@google/genai'
-import { base64ToBytes } from '../audio/pcm'
 
 export const MODEL = 'gemini-3.5-live-translate-preview'
 export type Lang = 'en' | 'vi'
@@ -7,8 +6,6 @@ export type Lang = 'en' | 'vi'
 export type SessionStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'error'
 
 export interface SessionCallbacks {
-  /** Translated audio: raw 16-bit 24kHz mono PCM */
-  onAudio(pcm: Uint8Array): void
   /** Incremental transcription of what the mic heard */
   onInputText(text: string): void
   /** Incremental transcription of the translated speech */
@@ -75,10 +72,9 @@ export class TranslateSession {
     if (!sc) return
     if (sc.inputTranscription?.text) this.cb.onInputText(sc.inputTranscription.text)
     if (sc.outputTranscription?.text) this.cb.onOutputText(sc.outputTranscription.text)
-    for (const part of sc.modelTurn?.parts ?? []) {
-      const data = part.inlineData?.data
-      if (data) this.cb.onAudio(base64ToBytes(data))
-    }
+    // The model's translated audio (modelTurn parts) is intentionally ignored:
+    // the app is text-only, and outputTranscription already carries the
+    // translation. Not decoding it also saves a base64 decode per chunk.
     if (sc.turnComplete) this.cb.onTurnComplete()
   }
 

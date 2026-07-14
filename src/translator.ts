@@ -1,5 +1,4 @@
 import { MicCapture } from './audio/capture'
-import { isSilentPcm } from './audio/pcm'
 import { TranslateSession, type Lang, type SessionStatus } from './gemini/session'
 
 export type Mode = 'conversation' | 'speech'
@@ -64,9 +63,16 @@ const VOICE_STALE_MS = 2000
  * echoTargetLanguage=false — whichever session hears non-target speech emits
  * the translation while the other stays silent.
  *
- * Output is text-only: the model's translated audio is discarded (used purely
- * as an "this session is translating" signal), so there is no playback and no
- * echo/feedback risk.
+ * Both sessions transcribe the speaker's input, so `inputTranscription` cannot
+ * tell them apart; only `outputTranscription` does — it is emitted solely by
+ * the session actually translating, and is empty on the other. That is why an
+ * utterance opens on output text alone.
+ *
+ * Do NOT use the model's translated audio as the "this session is translating"
+ * signal: the non-translating session's silence is not reliably silent (it
+ * bursts to ~0.27 full-scale, within 2x of real speech), so no peak threshold
+ * separates them. That produced phantom bubbles with the wrong source language
+ * and an empty translation. Output is text-only; the audio is never decoded.
  */
 export class Translator {
   private mic: MicCapture | null = null
@@ -190,22 +196,14 @@ export class Translator {
     }
 
     track.session = new TranslateSession(target, {
-      onAudio: (pcm) => {
-        // Both sessions stream continuous PCM; the one whose target matches the
-        // speaker sends (near-)silence. Audio is never played — non-silent
-        // chunks just mark this session as the one translating the speaker.
-        if (isSilentPcm(pcm)) return
-        if (!acceptFragment('audio')) return
-        ensureUtterance()
-        touch()
-      },
       onInputText: (text) => {
         console.debug(`[lt] ${target} input: ${text}`)
         if (!acceptFragment('input', text)) return
         track.inputBuf += text
         // In single-session (speech) mode, show the original text as soon as it
-        // arrives. In conversation mode, wait for output audio so only the
-        // session actually translating this speaker creates a bubble.
+        // arrives. In conversation mode, wait for output text so only the
+        // session actually translating this speaker creates a bubble — both
+        // sessions transcribe the input, so this alone would double every line.
         if (showInputImmediately) ensureUtterance()
         emit(false)
         touch()
