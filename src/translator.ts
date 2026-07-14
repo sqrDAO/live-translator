@@ -1,5 +1,4 @@
-import { MicCapture } from './audio/capture'
-import { isSilentPcm } from './audio/pcm'
+import { MicCapture, type MicCallbacks } from './audio/capture'
 import { TranslateSession, type Lang, type SessionStatus } from './gemini/session'
 
 export type Mode = 'conversation' | 'speech'
@@ -64,9 +63,16 @@ const VOICE_STALE_MS = 2000
  * echoTargetLanguage=false — whichever session hears non-target speech emits
  * the translation while the other stays silent.
  *
- * Output is text-only: the model's translated audio is discarded (used purely
- * as an "this session is translating" signal), so there is no playback and no
- * echo/feedback risk.
+ * Both sessions transcribe the speaker's input, so `inputTranscription` cannot
+ * tell them apart; only `outputTranscription` does — it is emitted solely by
+ * the session actually translating, and is empty on the other. That is why an
+ * utterance opens on output text alone.
+ *
+ * Do NOT use the model's translated audio as the "this session is translating"
+ * signal: the non-translating session's silence is not reliably silent (it
+ * bursts to ~0.27 full-scale, within 2x of real speech), so no peak threshold
+ * separates them. That produced phantom bubbles with the wrong source language
+ * and an empty translation. Output is text-only; the audio is never decoded.
  */
 export class Translator {
   private mic: MicCapture | null = null
@@ -83,6 +89,27 @@ export class Translator {
 
   get isRunning(): boolean {
     return this.running
+  }
+
+  /**
+   * Must be called synchronously from the user gesture that starts capture, so
+   * the AudioContext exists while the tap is still active (see MicCapture.unlock
+   * — without this, iOS Safari captures silence forever). start() reuses the
+   * context this creates.
+   */
+  unlockAudio(): void {
+    this.mic ??= new MicCapture(this.micCallbacks())
+    this.mic.unlock()
+  }
+
+  private micCallbacks(): MicCallbacks {
+    return {
+      onChunk: (b64) => this.tracks.forEach((t) => t.session.sendAudio(b64)),
+      onLevel: (level) => {
+        this.trackVoice(level)
+        this.ev.onLevel(level)
+      },
+    }
   }
 
   getStats(): TranslatorStats {
@@ -122,13 +149,8 @@ export class Translator {
       await Promise.all(this.tracks.map((t) => t.session.connect()))
       if (gen !== this.generation) return // superseded by stop() mid-connect
 
-      this.mic = new MicCapture({
-        onChunk: (b64) => this.tracks.forEach((t) => t.session.sendAudio(b64)),
-        onLevel: (level) => {
-          this.trackVoice(level)
-          this.ev.onLevel(level)
-        },
-      })
+      // Reuses the context unlockAudio() opened during the tap, if there was one.
+      this.mic ??= new MicCapture(this.micCallbacks())
       await this.mic.start(micDeviceId)
       if (gen !== this.generation) await this.teardown()
     } catch (err) {
@@ -190,22 +212,14 @@ export class Translator {
     }
 
     track.session = new TranslateSession(target, {
-      onAudio: (pcm) => {
-        // Both sessions stream continuous PCM; the one whose target matches the
-        // speaker sends (near-)silence. Audio is never played — non-silent
-        // chunks just mark this session as the one translating the speaker.
-        if (isSilentPcm(pcm)) return
-        if (!acceptFragment('audio')) return
-        ensureUtterance()
-        touch()
-      },
       onInputText: (text) => {
         console.debug(`[lt] ${target} input: ${text}`)
         if (!acceptFragment('input', text)) return
         track.inputBuf += text
         // In single-session (speech) mode, show the original text as soon as it
-        // arrives. In conversation mode, wait for output audio so only the
-        // session actually translating this speaker creates a bubble.
+        // arrives. In conversation mode, wait for output text so only the
+        // session actually translating this speaker creates a bubble — both
+        // sessions transcribe the input, so this alone would double every line.
         if (showInputImmediately) ensureUtterance()
         emit(false)
         touch()
@@ -245,8 +259,9 @@ export class Translator {
   }
 
   private async teardown(): Promise<void> {
+    // Keep the MicCapture (and its unlocked AudioContext) for the next start —
+    // see unlockAudio(). It holds no mic once stopped.
     await this.mic?.stop().catch(() => {})
-    this.mic = null
     this.tracks.forEach((t) => {
       if (t.idleTimer) clearTimeout(t.idleTimer)
       t.session.close()

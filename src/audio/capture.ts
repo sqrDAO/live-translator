@@ -22,6 +22,8 @@ export class MicCapture {
   private node: AudioWorkletNode | null = null
   private resampler: Resampler | null = null
   private pending: Float32Array = new Float32Array(0)
+  /** addModule() throws if 'capture' is re-registered on a reused context. */
+  private workletLoaded = false
   /** When true, capture continues (level meter live) but silence is sent. */
   muted = false
   deviceLabel = ''
@@ -30,44 +32,91 @@ export class MicCapture {
 
   constructor(private cb: MicCallbacks) {}
 
-  async start(deviceId?: string): Promise<void> {
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        // No playback in the app (text-only output), so AEC has nothing to
-        // cancel — it only gates/attenuates the mic when other system audio
-        // plays.
-        echoCancellation: false,
-        noiseSuppression: true,
-        autoGainControl: true,
-        channelCount: 1,
-        ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-      },
-    })
-    this.deviceLabel = this.stream.getAudioTracks()[0]?.label ?? '(unknown mic)'
-    // Run the graph at 16kHz so the browser does properly anti-aliased
-    // resampling; the linear-interpolation Resampler (no low-pass) is only a
-    // fallback if the browser refuses the rate.
-    this.ctx = new AudioContext({ sampleRate: TARGET_RATE })
-    await this.ctx.resume()
-    this.contextRate = this.ctx.sampleRate
-    await loadCaptureWorklet(this.ctx)
-    this.resampler =
-      this.ctx.sampleRate === TARGET_RATE ? null : new Resampler(this.ctx.sampleRate, TARGET_RATE)
+  /**
+   * Creates and resumes the AudioContext. MUST be called synchronously from the
+   * user gesture that starts capture — iOS Safari creates contexts suspended and
+   * only honours resume() while a gesture is active. start() is reached only
+   * after awaiting a token fetch, a websocket connect and the mic permission
+   * prompt, so a context created there would stay suspended forever: the worklet
+   * never runs, no audio is ever sent, and the UI still reads "translating".
+   * Safe to call more than once; start() calls it as a no-op fallback.
+   */
+  unlock(): void {
+    if (!this.ctx) {
+      // Ask for a 16kHz graph so the browser does properly anti-aliased
+      // resampling. iOS typically refuses and pins the hardware rate (48k),
+      // which is fine: the linear Resampler below covers it (verified to
+      // transcribe identically to a native 16k graph).
+      this.ctx = new AudioContext({ sampleRate: TARGET_RATE })
+      this.workletLoaded = false
+    }
+    void this.ctx.resume()
+  }
 
-    const source = this.ctx.createMediaStreamSource(this.stream)
-    this.node = new AudioWorkletNode(this.ctx, 'capture')
+  async start(deviceId?: string): Promise<void> {
+    this.unlock()
+    const ctx = this.ctx!
+    this.stream = await this.openStream(deviceId)
+    this.deviceLabel = this.stream.getAudioTracks()[0]?.label ?? '(unknown mic)'
+
+    // Re-assert after the permission prompt: iOS suspends the context while the
+    // prompt is up, and a suspended context silently captures nothing.
+    await ctx.resume().catch(() => {})
+    if (ctx.state !== 'running') {
+      throw new Error(`audio context ${ctx.state} — tap the mic button again`)
+    }
+    this.contextRate = ctx.sampleRate
+    this.chunksSent = 0
+    if (!this.workletLoaded) {
+      await loadCaptureWorklet(ctx)
+      this.workletLoaded = true
+    }
+    this.resampler = ctx.sampleRate === TARGET_RATE ? null : new Resampler(ctx.sampleRate, TARGET_RATE)
+
+    const source = ctx.createMediaStreamSource(this.stream)
+    this.node = new AudioWorkletNode(ctx, 'capture')
     this.node.port.onmessage = (e: MessageEvent<Float32Array>) => this.handleFrame(e.data)
 
     // Keep the node pulled by the graph without echoing the mic to speakers.
-    const sink = this.ctx.createGain()
+    const sink = ctx.createGain()
     sink.gain.value = 0
     source.connect(this.node)
     this.node.connect(sink)
-    sink.connect(this.ctx.destination)
+    sink.connect(ctx.destination)
+  }
+
+  /**
+   * A stored deviceId goes stale whenever the device list changes — routine on
+   * mobile, where a Bluetooth or wired headset connects and disconnects
+   * constantly. `deviceId: {exact}` then throws OverconstrainedError and the
+   * whole start fails, so fall back to the default mic instead of dying.
+   */
+  private async openStream(deviceId?: string): Promise<MediaStream> {
+    const audio: MediaTrackConstraints = {
+      // No playback in the app (text-only output), so AEC has nothing to
+      // cancel — it only gates/attenuates the mic when other system audio
+      // plays.
+      echoCancellation: false,
+      noiseSuppression: true,
+      autoGainControl: true,
+      channelCount: 1,
+    }
+    if (deviceId) {
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          audio: { ...audio, deviceId: { exact: deviceId } },
+        })
+      } catch (err) {
+        if ((err as Error)?.name !== 'OverconstrainedError') throw err
+        console.warn('[lt] saved mic is gone; falling back to the default mic')
+      }
+    }
+    return navigator.mediaDevices.getUserMedia({ audio })
   }
 
   private handleFrame(frame: Float32Array): void {
-    if (!this.ctx) return // stopped; ignore any straggler frames
+    // stop() nulls the node; the context outlives it, so it cannot signal this.
+    if (!this.node) return // stopped; ignore any straggler frames
     const resampled = this.resampler ? this.resampler.process(frame) : frame
     if (!resampled.length) return
 
@@ -91,14 +140,21 @@ export class MicCapture {
     }
   }
 
+  /**
+   * Releases the mic and the graph but keeps the AudioContext, suspended, so a
+   * restart (mic change, direction swap, mode switch) can reuse the context the
+   * user's tap unlocked. Those restarts happen after an await, where iOS Safari
+   * would refuse to start a fresh one. Stopping the tracks is what drops the
+   * mic indicator; an idle context holds no hardware. The context then lives for
+   * the page's lifetime, which is the usual Web Audio pattern.
+   */
   async stop(): Promise<void> {
     this.node?.port.close()
     this.node?.disconnect()
     this.node = null
     this.stream?.getTracks().forEach((t) => t.stop())
     this.stream = null
-    await this.ctx?.close().catch(() => {})
-    this.ctx = null
+    await this.ctx?.suspend().catch(() => {})
     this.pending = new Float32Array(0)
     this.resampler = null
   }

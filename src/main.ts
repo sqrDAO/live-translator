@@ -89,8 +89,15 @@ async function stopTranslator(): Promise<void> {
 }
 
 micBtn.addEventListener('click', () => {
-  if (translator.isRunning) void stopTranslator()
-  else void startTranslator()
+  if (translator.isRunning) {
+    void stopTranslator()
+    return
+  }
+  // Synchronously, while the tap is still active: everything inside
+  // startTranslator() runs after an await, which is too late for iOS Safari to
+  // let the AudioContext start.
+  translator.unlockAudio()
+  void startTranslator()
 })
 
 modeBtns.forEach((btn) =>
