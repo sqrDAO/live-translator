@@ -1,4 +1,4 @@
-import { MicCapture } from './audio/capture'
+import { MicCapture, type MicCallbacks } from './audio/capture'
 import { TranslateSession, type Lang, type SessionStatus } from './gemini/session'
 
 export type Mode = 'conversation' | 'speech'
@@ -91,6 +91,27 @@ export class Translator {
     return this.running
   }
 
+  /**
+   * Must be called synchronously from the user gesture that starts capture, so
+   * the AudioContext exists while the tap is still active (see MicCapture.unlock
+   * — without this, iOS Safari captures silence forever). start() reuses the
+   * context this creates.
+   */
+  unlockAudio(): void {
+    this.mic ??= new MicCapture(this.micCallbacks())
+    this.mic.unlock()
+  }
+
+  private micCallbacks(): MicCallbacks {
+    return {
+      onChunk: (b64) => this.tracks.forEach((t) => t.session.sendAudio(b64)),
+      onLevel: (level) => {
+        this.trackVoice(level)
+        this.ev.onLevel(level)
+      },
+    }
+  }
+
   getStats(): TranslatorStats {
     return {
       micDevice: this.mic?.deviceLabel ?? '',
@@ -128,13 +149,8 @@ export class Translator {
       await Promise.all(this.tracks.map((t) => t.session.connect()))
       if (gen !== this.generation) return // superseded by stop() mid-connect
 
-      this.mic = new MicCapture({
-        onChunk: (b64) => this.tracks.forEach((t) => t.session.sendAudio(b64)),
-        onLevel: (level) => {
-          this.trackVoice(level)
-          this.ev.onLevel(level)
-        },
-      })
+      // Reuses the context unlockAudio() opened during the tap, if there was one.
+      this.mic ??= new MicCapture(this.micCallbacks())
       await this.mic.start(micDeviceId)
       if (gen !== this.generation) await this.teardown()
     } catch (err) {
@@ -243,8 +259,9 @@ export class Translator {
   }
 
   private async teardown(): Promise<void> {
+    // Keep the MicCapture (and its unlocked AudioContext) for the next start —
+    // see unlockAudio(). It holds no mic once stopped.
     await this.mic?.stop().catch(() => {})
-    this.mic = null
     this.tracks.forEach((t) => {
       if (t.idleTimer) clearTimeout(t.idleTimer)
       t.session.close()
