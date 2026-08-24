@@ -146,14 +146,28 @@ body {
   padding-bottom: var(--spacing-md);
 }
 
-/* The one eyebrow that keeps its own casing: the section-label spec calls for
-   uppercase, but "sqrDAO" is a wordmark and BRAND-KIT.md says not to alter it.
-   Mono, letterspaced and gold still read it as a label. */
-.brand .eyebrow {
-  font-size: 0.62rem;
+/* The sqrDAO wordmark, sized by height so its proportions are untouched, with
+   clear space held below it — both BRAND-KIT.md rules. It is never tinted:
+   the brand ships a white cut and a black cut, and the theme picks one rather
+   than recolouring either. `display: none` on the unused cut keeps it out of
+   the accessibility tree too, so the name is announced once. */
+.logo {
   display: block;
-  margin-bottom: var(--spacing-xs);
-  text-transform: none;
+  height: 15px;
+  width: auto;
+  margin-bottom: var(--spacing-sm);
+}
+
+.logo-light {
+  display: none;
+}
+
+[data-theme='light'] .logo-dark {
+  display: none;
+}
+
+[data-theme='light'] .logo-light {
+  display: block;
 }
 
 .wordmark {

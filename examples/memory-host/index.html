@@ -4,7 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0a0a0a" />
-    <link rel="icon" href="/icons/icon-192.png" />
+    <!-- sqrDAO's own favicon set and manifest, copied from the sqrdao.com
+         landing so every property shows the same mark in the tab. The icons
+         are opaque (black wordmark on white), so they stay legible in light
+         and dark browser chrome alike. The manifest is the one thing retuned
+         for this surface: sqrdao.com declares a white theme, and this app is
+         dark-first, so it takes the system's #0A0A0A canvas instead. -->
+    <link rel="icon" href="/favicon/favicon-32x32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="/favicon/favicon-16x16.png" sizes="16x16" type="image/png" />
+    <link rel="icon" href="/favicon/favicon.ico" sizes="any" />
+    <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png" sizes="180x180" />
+    <link rel="manifest" href="/favicon/site.webmanifest" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <!-- The system's three faces: Instrument Sans for everything typographic,
@@ -21,7 +31,26 @@
     <div class="stage">
       <header class="top">
         <div class="brand">
-          <span class="eyebrow">sqrDAO · live-translate</span>
+          <!-- The wordmark ships in a white and a black cut; the theme picks
+               one. BRAND-KIT.md forbids recolouring the logo, so neither is
+               tinted — the correct file is shown and the other is hidden. -->
+          <img
+            class="logo logo-dark"
+            src="/brand/sqrdao-hor-white.svg"
+            alt="sqrDAO"
+            width="3930"
+            height="670"
+          />
+          <!-- Its own viewBox: the two cuts are exported at different scales
+               (3930×670 and 858×146), so each declares its own intrinsic size
+               rather than sharing one guess and getting squashed. -->
+          <img
+            class="logo logo-light"
+            src="/brand/sqrdao-hor-black.svg"
+            alt="sqrDAO"
+            width="858"
+            height="146"
+          />
           <h1 class="wordmark">Phiên&nbsp;dịch <em>live</em></h1>
         </div>
         <div class="meta">
