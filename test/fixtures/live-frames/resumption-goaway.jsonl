@@ -1,0 +1,6 @@
+# A resumable handle arrives, then goAway rotates the connection proactively.
+# The reopened socket's setup frame must carry that newest handle.
+{"atMs": 0, "target": "vi", "frame": {"sessionResumptionUpdate": {"newHandle": "H1", "resumable": true}}}
+{"atMs": 100, "target": "vi", "frame": {"sessionResumptionUpdate": {"newHandle": "H2", "resumable": false}}}
+{"atMs": 200, "target": "vi", "frame": {"goAway": {"timeLeft": "10s"}}}
+{"atMs": 1300, "reopen": {"target": "vi"}}

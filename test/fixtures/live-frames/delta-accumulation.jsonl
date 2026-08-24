@@ -1,0 +1,7 @@
+# Transcription frames are incremental deltas, not cumulative snapshots
+# (protocol observed 2026-08-10). Three EN-speaker deltas must publish as one
+# sentence, not three, and the EN passthrough completing retires it as final.
+{"atMs": 0, "target": "vi", "frame": {"serverContent": {"inputTranscription": {"text": "Hello everyone,"}, "outputTranscription": {"text": "Xin chào mọi người,"}}}}
+{"atMs": 300, "target": "vi", "frame": {"serverContent": {"inputTranscription": {"text": " and welcome to the"}, "outputTranscription": {"text": " và chào mừng đến"}}}}
+{"atMs": 600, "target": "vi", "frame": {"serverContent": {"inputTranscription": {"text": " annual forum."}, "outputTranscription": {"text": " diễn đàn thường niên."}, "turnComplete": true}}}
+{"atMs": 700, "target": "en", "frame": {"serverContent": {"inputTranscription": {"text": "Hello everyone, and welcome to the annual forum."}, "outputTranscription": {"text": "Hello everyone, and welcome to the annual forum."}, "turnComplete": true}}}
