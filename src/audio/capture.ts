@@ -136,16 +136,23 @@ export class AudioCapture {
     const context = this.unlockSync()
     this.storageKey = options.storageKey ?? DEFAULT_DEVICE_STORAGE_KEY
 
+    let stream: MediaStream | null = null
     try {
       const deviceId = options.deviceId ?? readSavedDevice(this.storageKey)
-      this.stream = await requestMicrophone(deviceId, this.storageKey)
-      if (generation !== this.generation) return void this.disposeStream()
+      // Held in a local until the generation check clears it. `getUserMedia`
+      // settles in no guaranteed order, so a superseded start that wrote the
+      // shared field first would then stop the *winner's* tracks on its way
+      // out and null the field — leaving a live microphone nothing holds and
+      // the recording indicator lit for the life of the page.
+      stream = await requestMicrophone(deviceId, this.storageKey)
+      if (generation !== this.generation) return void this.releaseStream(stream)
+      this.stream = stream
 
       // iOS suspends the context while the permission sheet is up.
       if (context.state === 'suspended') await context.resume()
-      if (generation !== this.generation) return void this.disposeStream()
+      if (generation !== this.generation) return void this.releaseStream(stream)
 
-      const track = this.stream.getAudioTracks()[0]
+      const track = stream.getAudioTracks()[0]
       if (track) {
         this.diagnostics.microphoneLabel = track.label || 'default'
         const settings = track.getSettings()
@@ -153,13 +160,13 @@ export class AudioCapture {
       }
 
       await context.audioWorklet.addModule(workletUrl())
-      if (generation !== this.generation) return void this.disposeStream()
+      if (generation !== this.generation) return void this.releaseStream(stream)
 
       this.resampler = new StreamingResampler(context.sampleRate, TARGET_SAMPLE_RATE)
       this.accumulator.reset()
       this.detector.reset()
 
-      this.source = context.createMediaStreamSource(this.stream)
+      this.source = context.createMediaStreamSource(stream)
       this.worklet = new AudioWorkletNode(context, WORKLET_NAME)
       this.worklet.port.onmessage = (event: MessageEvent<Float32Array>) => {
         if (generation !== this.generation) return
@@ -255,8 +262,17 @@ export class AudioCapture {
   }
 
   private disposeStream(): void {
-    this.stream?.getTracks().forEach((track) => track.stop())
-    this.stream = null
+    this.releaseStream(this.stream)
+  }
+
+  /**
+   * Stops the tracks of a stream this start opened, and clears the shared
+   * field only if it still points at that stream — a superseded start must
+   * never dispose the capture that replaced it.
+   */
+  private releaseStream(stream: MediaStream | null): void {
+    stream?.getTracks().forEach((track) => track.stop())
+    if (this.stream === stream) this.stream = null
   }
 
   get currentDiagnostics(): CaptureDiagnostics {

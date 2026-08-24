@@ -195,6 +195,79 @@ describe('resumption and goAway', () => {
     // The predecessor is detached by the replacement, not left half-open.
     expect(w.sockets[0]!.closed).toBe(true)
   })
+
+  it('rotates immediately, without the failure ladder\'s backoff', async () => {
+    vi.useFakeTimers()
+    const w = wire(async (t) => grant(`fresh-${t}`))
+    await startOpen(w)
+    const before = w.sockets.length
+    w.sockets[0]!.receive({ goAway: { timeLeft: '10s' } })
+    await flush()
+    // No timer advance: "on our own clock" means now, not one backoff step.
+    expect(w.sockets.length).toBe(before + 1)
+  })
+
+  it('does not spend the reconnect budget on routine rotations', async () => {
+    // caption-session-survives-90-minutes. `goAway` is routine — roughly every
+    // ten minutes per connection — so nine of them is a ~90-minute session.
+    // Routed through `scheduleReconnect` each one incremented `attempts`,
+    // which resets only on a delivered transcript *message*; a feed carrying
+    // none (a break, or the model correctly emitting nothing against the
+    // silence stream) therefore walked the ladder to the ceiling and fired
+    // onDead('exhausted') on the sixth rotation with both sockets healthy.
+    vi.useFakeTimers()
+    const w = wire(async (t) => grant(`fresh-${t}`))
+    await startOpen(w)
+    const latestFor = (target: string): StubSocket =>
+      w.sockets.filter((socket) => socket.url.endsWith(`-${target}`)).at(-1)!
+
+    for (let cycle = 0; cycle < 9; cycle += 1) {
+      for (const target of enVi.pair) {
+        const rotating = latestFor(target)
+        rotating.receive({ goAway: { timeLeft: '10s' } })
+        await flush()
+        // The server follows through on the announced close; the replacement
+        // is already up, so this must not read as a failure.
+        rotating.close({ code: 1001 })
+        const replacement = latestFor(target)
+        expect(replacement).not.toBe(rotating)
+        replacement.open()
+        await flush()
+      }
+      // Deliberately no transcript frame all session: that is the case the
+      // attempts counter cannot see.
+      await vi.advanceTimersByTimeAsync(600_000)
+    }
+
+    expect(w.dead).toEqual([])
+    expect(w.manager.openCount).toBe(2)
+    for (const target of enVi.pair) {
+      expect(w.mint.mock.calls.filter(([t]) => t === target)).toHaveLength(9)
+    }
+  })
+
+  it('lets a real failure still exhaust the budget after rotations', async () => {
+    // The rotation path must not become an escape hatch from the bound: a
+    // genuinely dead endpoint still gives up after five attempts.
+    vi.useFakeTimers()
+    let down = false
+    const w = wire(async (t) => {
+      if (down) throw new Error('endpoint down')
+      return grant(`fresh-${t}`)
+    })
+    await startOpen(w)
+    for (const target of enVi.pair) {
+      const socket = w.sockets.filter((s) => s.url.endsWith(`-${target}`)).at(-1)!
+      socket.receive({ goAway: { timeLeft: '10s' } })
+      await flush()
+      w.sockets.filter((s) => s.url.endsWith(`-${target}`)).at(-1)!.open()
+      await flush()
+    }
+    down = true
+    for (const socket of w.sockets) if (!socket.closed) socket.close()
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(w.dead).toEqual(['exhausted'])
+  })
 })
 
 describe('why the feed died is reported, not inferred', () => {

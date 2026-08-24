@@ -301,6 +301,42 @@ export class LiveSessionManager<G extends TokenGrant = TokenGrant> {
   // Reconnect — caption-publisher-reconnect
   // -------------------------------------------------------------------------
 
+  /**
+   * An announced rotation, NOT a failure (caption-session-survives-90-minutes).
+   * `goAway` is routine — roughly every ten minutes per connection — so it
+   * must not spend the reconnect budget: routed through `scheduleReconnect`
+   * it incremented `attempts`, which resets only on a delivered *message*, so
+   * a feed carrying no transcript frames (a break, or the model correctly
+   * emitting nothing against the silence stream) walked the ladder to the
+   * ceiling and declared itself dead after ~50 minutes with both sockets
+   * healthy. It also backed the rotation off 1s→2s→4s→8s→16s, the opposite of
+   * reconnecting "on our own clock".
+   *
+   * Reconnects immediately and leaves `attempts` alone: a rotation says
+   * nothing about whether the endpoint is failing.
+   */
+  private rotateSession(target: LangTag): void {
+    if (this.stopped || this.reconnectsCancelled) return
+    const state = this.reconnects.get(target)!
+    // A backed-off reconnect already in flight is recovering from a real
+    // failure; it owns this target and its ladder.
+    if (state.timer) return
+    // The same authority check the failure path makes: a lapsed authority is
+    // not ours to renew silently, however routine the rotation.
+    if (!this.options.authorityValid()) {
+      this.noteTargetDead(target, 'authority-lapsed')
+      return
+    }
+    // The close the server just announced is no longer news. Silencing this
+    // socket's handler is what keeps it from re-entering the failure path
+    // during the mint, before `openSession`'s `detachSessions` would have
+    // detached it anyway.
+    for (const session of this.sessions) {
+      if (session.target === target) session.socket.onclose = null
+    }
+    void this.reattach(target)
+  }
+
   private scheduleReconnect(target: LangTag): void {
     if (this.stopped || this.reconnectsCancelled) return
     const state = this.reconnects.get(target)!
@@ -423,7 +459,7 @@ export class LiveSessionManager<G extends TokenGrant = TokenGrant> {
       // connection age). Reconnect on our own clock — the fresh session
       // presents the stored handle and continues the context — rather than
       // waiting out the close plus backoff with the feed degraded.
-      this.scheduleReconnect(target)
+      this.rotateSession(target)
       return
     }
     // THIS is the end of an outage — a server message, not a handshake. An
