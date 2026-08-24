@@ -86,11 +86,26 @@ let running = false
 async function stop(): Promise<void> {
   running = false
   micBtn.classList.remove('on')
-  await engine?.stop()
-  engine = null
+  // Captured, because the await below spans an AudioContext close and an
+  // outbox flush, and `running` is already false: a tap inside that window
+  // starts a new engine, and nulling the field unconditionally afterwards
+  // dropped that engine's only reference — it kept the microphone and both
+  // sockets open with nothing left able to stop it.
+  const stopping = engine
+  await stopping?.stop()
+  if (engine === stopping) engine = null
 }
 
 function start(): void {
+  // Each run builds a fresh engine, so utterance ids restart at `u0` and
+  // `renderUtterance` would find the previous run's elements by id and
+  // overwrite them where they sit — new captions scattered among stale ones at
+  // old scroll positions instead of prepended. `MemorySink.prepare()` clears
+  // the sink; the DOM is the host's to clear. Keep `empty`: it is a child of
+  // the feed, not a sibling.
+  feed.replaceChildren(empty)
+  empty.classList.remove('hidden')
+
   // Auto direction: two sessions, the engine decides the source per utterance.
   engine = new LiveTranslateEngine({
     languages: enVi,

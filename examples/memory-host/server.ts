@@ -21,7 +21,13 @@ import type { LangTag } from '@sqrdao/live-translate/server'
 const PORT = Number(process.env.PORT ?? 3001)
 const MODEL = process.env.GEMINI_LIVE_MODEL ?? 'gemini-3.5-live-translate-preview'
 const apiKey = process.env.GEMINI_API_KEY
-const developmentEnvironment = (process.env.APP_ENV ?? 'development') === 'development'
+// Opt IN, not out. Defaulting this to 'development' meant the stub path was
+// live unless someone remembered to set APP_ENV — the opposite of the gate the
+// comment below and .env.example both describe. The loopback check kept it
+// from being reachable in practice, but this is a reference host other
+// projects start from, and a security gate that defaults open is the wrong
+// shape to copy.
+const developmentEnvironment = process.env.APP_ENV === 'development'
 
 const app = express()
 app.use(express.json())

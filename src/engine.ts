@@ -228,6 +228,16 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
   private idleTimer: ReturnType<typeof setInterval> | null = null
   private partialTimer: ReturnType<typeof setTimeout> | null = null
   private status: FeedStatus = 'idle'
+  /**
+   * A write the sink refused or that threw — a store concern, not a socket
+   * one, which is why it is held apart from `deriveStatus()` rather than
+   * folded into it. It must be *cleared* by the next write that lands: set
+   * directly on the status it pinned the feed to `degraded` for the rest of
+   * the session, because nothing re-derived after a socket-quiet recovery,
+   * and the 4 s heartbeat then republished `degraded` while every write was
+   * landing.
+   */
+  private writeFailing = false
   private stopped = true
   /** The newest partial replaces older partials while the slot is closed. */
   private pendingPartial: MergedUtterance | null = null
@@ -263,14 +273,14 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
       adoptRenewal: (grant) => options.sink.adoptRenewal(grant),
       onMessage: (target, message, receivedAt) => this.handleMessage(target, message, receivedAt),
       onReconnected: () => {
-        this.setStatus(this.deriveStatus())
+        this.refreshStatus()
         void this.outbox.requestState()
       },
-      onSocketError: () => this.setStatus(this.deriveStatus()),
+      onSocketError: () => this.refreshStatus(),
       onSocketClose: (info) => {
         options.onSocketClose?.(info)
         const status = this.deriveStatus()
-        this.setStatus(status)
+        this.refreshStatus()
         // Both sockets usually close in the same tick. The first write is
         // `degraded` and the second is the truth — so the second must not queue
         // behind the state interval, or the surface spends that interval
@@ -302,6 +312,8 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
 
   async start(startOptions: EngineStartOptions<G> = {}): Promise<void> {
     this.stopped = false
+    // A new session does not inherit the last one's store trouble.
+    this.writeFailing = false
     this.setStatus('connecting')
 
     // The sink's preparation runs alongside the socket opens, not before
@@ -320,7 +332,7 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
     if (this.stopped) return
     // `live` when both opened; a direction that failed to open during start is
     // already `degraded`, exactly as it would be after a later drop.
-    this.setStatus(this.deriveStatus())
+    this.refreshStatus()
     // Announce immediately: without this a surface keeps the previous
     // session's last state until the first heartbeat (~4 s) or the first
     // published segment (caption-start-clears-the-wall).
@@ -403,6 +415,16 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
   private deriveStatus(): FeedStatus {
     const open = this.sessions.openCount
     return open === this.pair.length ? 'live' : open > 0 ? 'degraded' : 'unavailable'
+  }
+
+  /**
+   * The derivation, plus the store's verdict. A failing write degrades a feed
+   * whose sockets are both up; it can never improve on an outage the socket
+   * derivation already reports, so it only ever pulls `live` down.
+   */
+  private refreshStatus(): void {
+    const derived = this.deriveStatus()
+    this.setStatus(this.writeFailing && derived === 'live' ? 'degraded' : derived)
   }
 
   /**
@@ -642,11 +664,15 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
         return
       }
       if (!landed) {
-        // A refused write means the authority moved on. Degrade rather than
-        // retry; the host already knows why it refused.
-        this.setStatus('degraded')
+        // A refused write usually means the authority moved on. Degrade rather
+        // than retry; the host already knows why it refused. Recorded as a
+        // flag, not a fixed status: if it really has moved on the next writes
+        // are refused too and the feed stays degraded, and if it was transient
+        // the first write that lands clears it.
+        this.noteWriteFailed()
         return
       }
+      this.noteWriteLanded()
       this.published.set(utteranceId, { final })
       // After the write resolves, so the figure includes the round trip this
       // browser paid for — the half of the budget a direct client write
@@ -664,9 +690,22 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
       this.options.onUtterance?.(utterance, final)
       void this.outbox.requestState()
     } catch (cause) {
-      this.setStatus('degraded')
+      this.noteWriteFailed()
       this.options.onError(asError(cause))
     }
+  }
+
+  private noteWriteFailed(): void {
+    this.writeFailing = true
+    this.refreshStatus()
+  }
+
+  /** Clears the store's verdict — and only then re-derives, so a landing write
+   * cannot churn `onStatus` on every segment of a healthy feed. */
+  private noteWriteLanded(): void {
+    if (!this.writeFailing) return
+    this.writeFailing = false
+    this.refreshStatus()
   }
 
   /**

@@ -188,6 +188,57 @@ describe('the engine drives audio and both sessions through the sink', () => {
     expect(engine.currentStatus).toBe('degraded')
   })
 
+  it('recovers from a transient write failure instead of latching degraded', async () => {
+    // A store timeout or a 503 is not a socket outage. Setting `degraded`
+    // directly pinned the feed there for the rest of the session — nothing
+    // re-derived once writes started landing again, and the 4 s heartbeat
+    // republished it, so every surface read "one direction interrupted" while
+    // both sockets were live and every write was landing.
+    const { engine, sink } = makeHarness()
+    const [vi, en] = await start(engine)
+    expect(engine.currentStatus).toBe('live')
+
+    const accept = sink.publish.bind(sink)
+    let failing = true
+    sink.publish = async (utterance, final) => {
+      if (failing) throw new Error('store timeout')
+      return accept(utterance, final)
+    }
+
+    vi.receive(liveMessage('Hello', 'Xin chào', true))
+    en.receive(liveMessage('Hello', 'Hello', true))
+    await flush()
+    expect(engine.currentStatus).toBe('degraded')
+
+    // The store comes back.
+    failing = false
+    vi.receive(liveMessage('Again', 'Lại nữa', true))
+    en.receive(liveMessage('Again', 'Again', true))
+    await flush()
+    expect(engine.currentStatus).toBe('live')
+  })
+
+  it('does not let a landing write paper over a dropped direction', async () => {
+    // The store's verdict only ever pulls `live` down; it can never report a
+    // feed healthier than its sockets are.
+    const { engine, sink } = makeHarness()
+    const [vi, en] = await start(engine)
+    sink.acceptWrites = false
+
+    vi.receive(liveMessage('Hello', 'Xin chào', true))
+    en.receive(liveMessage('Hello', 'Hello', true))
+    await flush()
+    expect(engine.currentStatus).toBe('degraded')
+
+    en.close()
+    await flush()
+    sink.acceptWrites = true
+    vi.receive(liveMessage('Again', 'Lại nữa', true))
+    en.receive(liveMessage('Again', 'Again', true))
+    await flush()
+    expect(engine.currentStatus).toBe('degraded') // one socket, not recovered
+  })
+
   it('publishes no device id or operator identifier in the utterance', async () => {
     const { engine, sink } = makeHarness()
     const [vi, en] = await start(engine)
