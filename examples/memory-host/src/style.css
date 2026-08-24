@@ -314,9 +314,11 @@ body {
   font-size: 0.62rem;
   color: var(--faint);
   padding-bottom: 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Wraps rather than ellipsing. Truncating this line hid the socket and
+     frame counters off the right edge — the half that says whether the model
+     is answering at all, which is the reason to read it. */
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .utt.note .translated {
