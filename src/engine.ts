@@ -379,8 +379,16 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
     if (hasVoice) this.noteChunkArrival(Date.now())
     this.sessions.send(
       JSON.stringify({
+        // `audio`, not `mediaChunks`. This is the shape the implementation
+        // being ported put on the wire — `sendRealtimeInput({ audio })`, the
+        // only version of this code proven in a room — and v1beta deprecates
+        // `mediaChunks`, the v1alpha-era field the first extraction reached
+        // for with no rationale recorded. A server that ignores the deprecated
+        // field takes no audio at all, and the symptom is indistinguishable
+        // from a translation that never parses. ADR-001 still applies: probe
+        // it per deployment, never assume it.
         realtimeInput: {
-          mediaChunks: [{ mimeType: 'audio/pcm;rate=16000', data: base64Pcm16 }],
+          audio: { mimeType: 'audio/pcm;rate=16000', data: base64Pcm16 },
         },
       }),
     )

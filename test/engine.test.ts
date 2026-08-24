@@ -19,8 +19,8 @@ describe('the engine drives audio and both sessions through the sink', () => {
     expect(JSON.parse(vi.sent[0]!)).toHaveProperty('setup')
 
     engine.pushAudio('pcm16-chunk')
-    expect(JSON.parse(vi.sent[1]!).realtimeInput.mediaChunks[0].data).toBe('pcm16-chunk')
-    expect(JSON.parse(en.sent[1]!).realtimeInput.mediaChunks[0].data).toBe('pcm16-chunk')
+    expect(JSON.parse(vi.sent[1]!).realtimeInput.audio.data).toBe('pcm16-chunk')
+    expect(JSON.parse(en.sent[1]!).realtimeInput.audio.data).toBe('pcm16-chunk')
   })
 
   it('streams gated silence to both sessions without opening a speech run', async () => {
@@ -28,8 +28,8 @@ describe('the engine drives audio and both sessions through the sink', () => {
     const [vi, en] = await start(engine)
 
     engine.pushAudio('silence-zeros', false)
-    expect(JSON.parse(vi.sent[1]!).realtimeInput.mediaChunks[0].data).toBe('silence-zeros')
-    expect(JSON.parse(en.sent[1]!).realtimeInput.mediaChunks[0].data).toBe('silence-zeros')
+    expect(JSON.parse(vi.sent[1]!).realtimeInput.audio.data).toBe('silence-zeros')
+    expect(JSON.parse(en.sent[1]!).realtimeInput.audio.data).toBe('silence-zeros')
 
     vi.receive(liveMessage('Xin chào', 'Hello'))
     await flush()
