@@ -88,17 +88,63 @@ function removeUtterance(utteranceId: string): void {
  * eating real speech. The two look identical from the feed — both sit at
  * "đang dịch" and publish nothing — and cost hours apart without this line.
  */
+let lastCapture: CaptureDiagnostics | null = null
+let lastPaintedAt = 0
+
+/**
+ * What the sockets are doing, counted by wrapping `createSocket`.
+ *
+ * Audio leaving the microphone proves nothing on its own: a session that
+ * opens and is closed by the server on its setup frame reconnects behind the
+ * status line, so the feed reads "đang dịch" while every chunk is dropped
+ * into a socket that is not there. `frames` separates that from a session
+ * that is connected and simply has nothing to say.
+ */
+const wire = { sockets: 0, frames: 0, closes: 0, lastClose: '' }
+
+function createSocket(url: string): WebSocket {
+  const socket = new WebSocket(url)
+  wire.sockets += 1
+  socket.addEventListener('message', () => {
+    wire.frames += 1
+    paint()
+  })
+  socket.addEventListener('close', (event) => {
+    wire.closes += 1
+    wire.lastClose = `${event.code}${event.reason ? ` ${event.reason}` : ''}`
+    paint(true)
+  })
+  return socket
+}
+
 function renderDiagnostics(d: CaptureDiagnostics): void {
+  lastCapture = d
+  paint(true)
+}
+
+/** Throttled: frames arrive ~10/s per session and each one would repaint. */
+function paint(force = false): void {
+  const now = Date.now()
+  if (!force && now - lastPaintedAt < 250) return
+  lastPaintedAt = now
   diagEl.hidden = false
   const rms = (value: number) => value.toFixed(3)
+  const d = lastCapture
   diagEl.textContent = [
-    d.microphoneLabel,
-    `${(d.contextSampleRate / 1000).toFixed(0)}kHz`,
-    `${d.chunksSent} chunks`,
-    `rms ${rms(d.lastChunkRms)} (peak ${rms(d.peakRms)})`,
-    `gate ${rms(d.threshold)} over floor ${rms(d.noiseFloor)}`,
-    `${d.droppedSilentChunks} silent`,
-    ...(d.gatedWhileAudible > 0 ? [`⚠ ${d.gatedWhileAudible} gated while audible`] : []),
+    ...(d
+      ? [
+          d.microphoneLabel,
+          `${(d.contextSampleRate / 1000).toFixed(0)}kHz`,
+          `${d.chunksSent} chunks`,
+          `rms ${rms(d.lastChunkRms)} (peak ${rms(d.peakRms)})`,
+          `gate ${rms(d.threshold)} over floor ${rms(d.noiseFloor)}`,
+          `${d.droppedSilentChunks} silent`,
+          ...(d.gatedWhileAudible > 0 ? [`⚠ ${d.gatedWhileAudible} gated while audible`] : []),
+        ]
+      : []),
+    `${wire.sockets} sockets`,
+    `${wire.frames} frames in`,
+    ...(wire.closes > 0 ? [`⚠ ${wire.closes} closes (last ${wire.lastClose})`] : []),
   ].join(' · ')
 }
 
@@ -155,10 +201,16 @@ function start(): void {
   empty.classList.remove('hidden')
 
   // Auto direction: two sessions, the engine decides the source per utterance.
+  wire.sockets = 0
+  wire.frames = 0
+  wire.closes = 0
+  wire.lastClose = ''
   engine = new LiveTranslateEngine({
     languages: enVi,
     sink,
     mintToken,
+    createSocket,
+    onSocketClose: (info) => console.warn('[socket closed]', info),
     onError: (error) => {
       console.error(error)
       renderStatus('unavailable')
