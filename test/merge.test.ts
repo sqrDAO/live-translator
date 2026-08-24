@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { detectEnVi, enVi } from '../src/lang/en-vi'
-import type { LanguagePack } from '../src/lang/types'
+import type { LangTag, LanguagePack } from '../src/lang/types'
 import {
   UtteranceMerger,
   countSentences,
@@ -23,6 +23,31 @@ describe('the EN/VI detector', () => {
     expect(detectEnVi('1 2 3 4')).toBeNull()
     expect(detectEnVi('Techcombank 2026')).toBeNull()
     expect(detectEnVi('')).toBeNull()
+  })
+
+  it('reads content-word English, which no function-word list can', () => {
+    // The complaint that started this: English without a function word
+    // abstained, and every abstention fell through to a source-language
+    // inference that was itself inverted. None of these carry one.
+    expect(detectEnVi('Solana validators')).toBe('en')
+    expect(detectEnVi('Smart contract deployment')).toBe('en')
+    expect(detectEnVi('Transaction throughput matters')).toBe('en')
+    expect(detectEnVi('sqrDAO builds developer tools')).toBe('en')
+  })
+
+  it('needs English morphology, not merely the absence of Vietnamese', () => {
+    // Two romanized names are not Vietnamese either, and calling them English
+    // would put a proper-noun caption on the wrong side of the same-language
+    // veto. They abstain, and behavioral inference decides instead.
+    expect(detectEnVi('Blockchain Summit')).toBeNull()
+    expect(detectEnVi('Karaoke karaoke')).toBeNull()
+    expect(detectEnVi('Da Nang 2026')).toBeNull()
+  })
+
+  it('still reads Vietnamese, including a line thick with English loanwords', () => {
+    expect(detectEnVi('Chào buổi sáng mọi người')).toBe('vi')
+    expect(detectEnVi('Trình xác thực Solana')).toBe('vi')
+    expect(detectEnVi('Blockchain là một công nghệ sổ cái phân tán')).toBe('vi')
   })
 
   it('does not let a Vietnamese proper noun flip an English line', () => {
@@ -163,6 +188,90 @@ describe('source-language inference and fragment merge', () => {
   it('counts only real sentence ends, guarding decimals', () => {
     expect(countSentences('One. Two. Three.')).toBe(3)
     expect(countSentences('About 1.5 to 2.5 and 3.5 seconds')).toBe(0)
+  })
+})
+
+describe('the live protocol shape, as probed', () => {
+  // PROBED 2026-08-24 against `gemini-3.5-live-translate-preview`, both
+  // directions: the session whose target is the language being spoken emits
+  // `inputTranscription` and NO output of any kind — not an echo, nothing.
+  // Only the translating session produces output text. Every other fixture in
+  // this file predates that measurement and models an echo instead, which is
+  // why none of them caught the inversion below.
+  const EN_SPEECH = { original: 'Solana validators', translated: 'Trình xác thực Solana' }
+  const VI_SPEECH = { original: 'Chào buổi sáng mọi người', translated: 'Good morning everyone' }
+
+  it('reads the silent session as the speaker\'s language, not as the hardest translator', () => {
+    // The silent session scores zero token overlap, the bottom of the scale,
+    // so ranking by overlap alone concluded the *opposite* of the truth: it
+    // labelled English speech 'vi' because the vi session's translation
+    // shared "Solana" with its own input and so scored above zero.
+    expect(
+      inferSourceLanguage(
+        [
+          { utteranceId: 'u1', targetLang: 'vi', originalText: EN_SPEECH.original, translatedText: EN_SPEECH.translated, final: false, receivedAt: now },
+          { utteranceId: 'u1', targetLang: 'en', originalText: EN_SPEECH.original, final: false, receivedAt: now + 10 },
+        ],
+        enVi.pair,
+      ),
+    ).toBe('en')
+
+    expect(
+      inferSourceLanguage(
+        [
+          { utteranceId: 'u1', targetLang: 'en', originalText: VI_SPEECH.original, translatedText: VI_SPEECH.translated, final: false, receivedAt: now },
+          { utteranceId: 'u1', targetLang: 'vi', originalText: VI_SPEECH.original, final: false, receivedAt: now + 10 },
+        ],
+        enVi.pair,
+      ),
+    ).toBe('vi')
+  })
+
+  it('publishes English speech the detector cannot name', () => {
+    // "Solana validators" carries no English function word. Before the
+    // inference was corrected this whole utterance was dropped: the label
+    // came out 'vi', `build()` then looked for the translation among the
+    // silent session's fragments, found none, and returned null.
+    const m = merger()
+    m.add({ utteranceId: 'u1', targetLang: 'vi', originalText: EN_SPEECH.original, translatedText: EN_SPEECH.translated, final: false, receivedAt: now })
+    const merged = m.add({ utteranceId: 'u1', targetLang: 'en', originalText: EN_SPEECH.original, final: false, receivedAt: now + 10 })
+    expect(merged).toMatchObject({ sourceLang: 'en', original: EN_SPEECH.original, translated: EN_SPEECH.translated })
+  })
+
+  it('publishes Vietnamese speech the same way, from the mirrored shape', () => {
+    const m = merger()
+    m.add({ utteranceId: 'u1', targetLang: 'en', originalText: VI_SPEECH.original, translatedText: VI_SPEECH.translated, final: false, receivedAt: now })
+    const merged = m.add({ utteranceId: 'u1', targetLang: 'vi', originalText: VI_SPEECH.original, final: false, receivedAt: now + 10 })
+    expect(merged).toMatchObject({ sourceLang: 'vi', original: VI_SPEECH.original, translated: VI_SPEECH.translated })
+  })
+
+  it('abstains while one session is silent and alone, rather than guessing', () => {
+    // Silence is only the speaker's-language signature once the peer has
+    // produced output. On its own it is equally a translating session whose
+    // output has not landed, and nothing can be published under either label.
+    expect(
+      inferSourceLanguage(
+        [{ utteranceId: 'u1', targetLang: 'en', originalText: EN_SPEECH.original, final: false, receivedAt: now }],
+        enVi.pair,
+      ),
+    ).toBeNull()
+  })
+
+  it('falls through to inference when the two transcripts disagree', () => {
+    // Both sessions transcribe the same audio; here the vi session mangles
+    // Vietnamese speech into something that reads as English. Consulting it
+    // first and taking the first non-null answer — the old rule — labelled
+    // the speaker 'en' and the utterance was lost. A disagreement is not
+    // evidence, so behaviour decides: the vi session is the silent one.
+    const labels: Record<string, LangTag> = {
+      'Chào buổi sáng': 'vi',
+      'Good morning': 'en',
+      'Chow boy sang': 'en',
+    }
+    const m = new UtteranceMerger({ pair: enVi.pair, detect: (text) => labels[text.trim()] ?? null })
+    m.add({ utteranceId: 'u1', targetLang: 'en', originalText: 'Chào buổi sáng', translatedText: 'Good morning', final: false, receivedAt: now })
+    const merged = m.add({ utteranceId: 'u1', targetLang: 'vi', originalText: 'Chow boy sang', final: false, receivedAt: now + 10 })
+    expect(merged).toMatchObject({ sourceLang: 'vi', original: 'Chào buổi sáng', translated: 'Good morning' })
   })
 })
 
