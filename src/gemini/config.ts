@@ -11,7 +11,7 @@
  * session it opens, and an operator diagnostics panel may display it.
  */
 
-import { assertLanguagePair, otherOf, type LangTag, type LanguagePack } from '../lang/types'
+import { assertLanguagePair, otherOf, type LangTag, type LanguagePack } from '../lang/types.js'
 
 /**
  * Silence the model requires before it ends a turn.
@@ -209,12 +209,21 @@ export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<st
       ],
     },
     // The input transcription is what the speaker actually said; the model's
-    // translation comes back as `modelTurn.parts[].text` under the TEXT
-    // modality above, and the two together are the session discriminator used
-    // to infer the source language. `outputAudioTranscription` is deliberately
-    // NOT requested: it transcribes the model's *audio*, of which a TEXT
-    // session produces none, so it only ever added a dead field to a config
-    // the ephemeral token pins verbatim.
+    // translation comes back as `outputTranscription`, and the two together
+    // are the session discriminator used to infer the source language.
+    //
+    // PROBED 2026-08-24: `responseModalities: ['TEXT']` above is accepted by
+    // the mint and then ignored — the model answers in 24 kHz audio under
+    // `modelTurn.parts[].inlineData` and transcribes itself, so
+    // `outputTranscription` arrives on every translating turn even though
+    // `outputAudioTranscription` is not requested here. Requesting it changes
+    // nothing except what the token pins, so it stays out.
+    //
+    // The discriminator was re-verified in both directions at the same time:
+    // on EN speech the vi-target session emits input + output and the
+    // en-target session emits input only. That still holds now that the
+    // direction is carried by `systemInstruction` rather than the old
+    // `translationConfig.echoTargetLanguage: false`.
     inputAudioTranscription: {},
     realtimeInputConfig: {
       automaticActivityDetection: {

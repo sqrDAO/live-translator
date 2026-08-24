@@ -18,7 +18,7 @@ export {
   type MintSessionTokenInput,
   type MintedToken,
   type SessionTokenGrant,
-} from './token'
+} from './token.js'
 
 export {
   TURN_SILENCE_MS,
@@ -27,7 +27,7 @@ export {
   buildTokenConstraints,
   type LiveSessionConfigInput,
   type LiveSessionContext,
-} from '../gemini/config'
+} from '../gemini/config.js'
 
 export {
   assertLanguagePair,
@@ -37,6 +37,6 @@ export {
   type LanguageNames,
   type LanguagePack,
   type LanguagePair,
-} from '../lang/types'
+} from '../lang/types.js'
 
-export type { TokenGrant } from '../sink'
+export type { TokenGrant } from '../sink.js'

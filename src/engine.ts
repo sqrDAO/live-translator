@@ -16,12 +16,12 @@
  * are verified per deployment, never assumed from the pinned version.
  */
 
-import { AudioCapture, type CaptureDiagnostics } from './audio/capture'
-import { CHUNK_MS, VAD_DEFAULTS } from './audio/pcm'
-import { TURN_SILENCE_MS } from './gemini/config'
-import type { ParsedLiveMessage } from './gemini/frames'
-import { assertLanguagePair, type LangTag, type LanguagePack } from './lang/types'
-import { LiveSessionManager, type SocketCloseInfo } from './session/live-session'
+import { AudioCapture, type CaptureDiagnostics } from './audio/capture.js'
+import { CHUNK_MS, VAD_DEFAULTS } from './audio/pcm.js'
+import { TURN_SILENCE_MS } from './gemini/config.js'
+import type { ParsedLiveMessage } from './gemini/frames.js'
+import { assertLanguagePair, type LangTag, type LanguagePack } from './lang/types.js'
+import { LiveSessionManager, type SocketCloseInfo } from './session/live-session.js'
 import {
   type CaptionSink,
   type FeedDeathReason,
@@ -29,12 +29,12 @@ import {
   type MintToken,
   type PublishableUtterance,
   type TokenGrant,
-} from './sink'
-import { TargetTurnCoordinator, type TurnPublication } from './transcript/coordinator'
-import { LatencyTracker, type LatencySnapshot } from './transcript/latency'
-import type { MergedUtterance } from './transcript/merge'
-import { PublicationOutbox } from './transcript/outbox'
-import { WriteThrottle } from './transcript/throttle'
+} from './sink.js'
+import { TargetTurnCoordinator, type TurnPublication } from './transcript/coordinator.js'
+import { LatencyTracker, type LatencySnapshot } from './transcript/latency.js'
+import type { MergedUtterance } from './transcript/merge.js'
+import { PublicationOutbox } from './transcript/outbox.js'
+import { WriteThrottle } from './transcript/throttle.js'
 
 /** Feed state is written at most once every 500 ms. */
 export const STATE_WRITE_INTERVAL_MS = 500

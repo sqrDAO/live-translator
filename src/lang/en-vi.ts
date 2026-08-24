@@ -8,7 +8,7 @@
  * list as if they were general.
  */
 
-import type { LangTag, LanguagePack } from './types'
+import type { LangTag, LanguagePack } from './types.js'
 
 export const EN: LangTag = 'en'
 export const VI: LangTag = 'vi'

@@ -1,6 +1,11 @@
 import './style.css'
 
-import { LiveTranslateEngine, type MintToken, type TokenGrant } from '@sqrdao/live-translate'
+import {
+  LiveTranslateEngine,
+  type CaptureDiagnostics,
+  type MintToken,
+  type TokenGrant,
+} from '@sqrdao/live-translate'
 import { enVi } from '@sqrdao/live-translate/lang/en-vi'
 
 import { MemorySink, type StoredUtterance } from './memory-sink'
@@ -36,6 +41,8 @@ const empty = $('#empty')
 const statusEl = $('#status')
 const statusText = $('#status-text')
 const micBtn = $<HTMLButtonElement>('#mic')
+const deviceSel = $<HTMLSelectElement>('#device')
+const diagEl = $('#diag')
 
 const STATUS_LABEL: Record<string, string> = {
   idle: 'sẵn sàng',
@@ -73,6 +80,93 @@ function removeUtterance(utteranceId: string): void {
   document.getElementById(`utt-${utteranceId}`)?.remove()
 }
 
+/**
+ * The operator's answer to "which mic, and is audio reaching the model".
+ *
+ * `peakRms` near zero with chunks climbing is a silent or wrong input device;
+ * a healthy `peakRms` with `gatedWhileAudible` climbing is the noise gate
+ * eating real speech. The two look identical from the feed — both sit at
+ * "đang dịch" and publish nothing — and cost hours apart without this line.
+ */
+let lastCapture: CaptureDiagnostics | null = null
+let lastPaintedAt = 0
+
+/**
+ * What the sockets are doing, counted by wrapping `createSocket`.
+ *
+ * Audio leaving the microphone proves nothing on its own: a session that
+ * opens and is closed by the server on its setup frame reconnects behind the
+ * status line, so the feed reads "đang dịch" while every chunk is dropped
+ * into a socket that is not there. `frames` separates that from a session
+ * that is connected and simply has nothing to say.
+ */
+const wire = { sockets: 0, frames: 0, closes: 0, lastClose: '' }
+
+function createSocket(url: string): WebSocket {
+  const socket = new WebSocket(url)
+  wire.sockets += 1
+  socket.addEventListener('message', () => {
+    wire.frames += 1
+    paint()
+  })
+  socket.addEventListener('close', (event) => {
+    wire.closes += 1
+    wire.lastClose = `${event.code}${event.reason ? ` ${event.reason}` : ''}`
+    paint(true)
+  })
+  return socket
+}
+
+function renderDiagnostics(d: CaptureDiagnostics): void {
+  lastCapture = d
+  paint(true)
+}
+
+/** Throttled: frames arrive ~10/s per session and each one would repaint. */
+function paint(force = false): void {
+  const now = Date.now()
+  if (!force && now - lastPaintedAt < 250) return
+  lastPaintedAt = now
+  diagEl.hidden = false
+  const rms = (value: number) => value.toFixed(3)
+  const d = lastCapture
+  diagEl.textContent = [
+    ...(d
+      ? [
+          d.microphoneLabel,
+          `${(d.contextSampleRate / 1000).toFixed(0)}kHz`,
+          `${d.chunksSent} chunks`,
+          `rms ${rms(d.lastChunkRms)} (peak ${rms(d.peakRms)})`,
+          `gate ${rms(d.threshold)} over floor ${rms(d.noiseFloor)}`,
+          `${d.droppedSilentChunks} silent`,
+          ...(d.gatedWhileAudible > 0 ? [`⚠ ${d.gatedWhileAudible} gated while audible`] : []),
+        ]
+      : []),
+    `${wire.sockets} sockets`,
+    `${wire.frames} frames in`,
+    ...(wire.closes > 0 ? [`⚠ ${wire.closes} closes (last ${wire.lastClose})`] : []),
+  ].join(' · ')
+}
+
+/**
+ * Device labels are blank until the microphone permission is granted, so this
+ * runs again after the first successful start.
+ */
+async function refreshDevices(): Promise<void> {
+  if (!navigator.mediaDevices?.enumerateDevices) return
+  const devices = await navigator.mediaDevices.enumerateDevices().catch(() => [])
+  const mics = devices.filter((d) => d.kind === 'audioinput')
+  if (mics.length === 0) return
+  const chosen = deviceSel.value
+  deviceSel.replaceChildren(new Option('default microphone', ''))
+  for (const mic of mics) {
+    deviceSel.add(new Option(mic.label || `microphone ${mic.deviceId.slice(0, 6)}`, mic.deviceId))
+  }
+  if (chosen) deviceSel.value = chosen
+}
+
+void refreshDevices()
+
 // --- engine ------------------------------------------------------------------
 const sink = new MemorySink({
   onUtterance: renderUtterance,
@@ -107,10 +201,16 @@ function start(): void {
   empty.classList.remove('hidden')
 
   // Auto direction: two sessions, the engine decides the source per utterance.
+  wire.sockets = 0
+  wire.frames = 0
+  wire.closes = 0
+  wire.lastClose = ''
   engine = new LiveTranslateEngine({
     languages: enVi,
     sink,
     mintToken,
+    createSocket,
+    onSocketClose: (info) => console.warn('[socket closed]', info),
     onError: (error) => {
       console.error(error)
       renderStatus('unavailable')
@@ -122,11 +222,21 @@ function start(): void {
   engine.unlockAudioSync()
   running = true
   micBtn.classList.add('on')
-  void engine.start().catch((error) => {
-    console.error(error)
-    renderStatus('unavailable')
-    void stop()
-  })
+  void engine
+    .start({
+      microphone: {
+        onDiagnostics: renderDiagnostics,
+        // Empty value = let the engine use its remembered device, then the
+        // browser default. Chrome's default is not always the mic in the room.
+        ...(deviceSel.value ? { deviceId: deviceSel.value } : {}),
+      },
+    })
+    .then(refreshDevices)
+    .catch((error) => {
+      console.error(error)
+      renderStatus('unavailable')
+      void stop()
+    })
 }
 
 micBtn.addEventListener('click', () => {

@@ -13,8 +13,8 @@ import {
   buildLiveSessionConfig,
   buildTokenConstraints,
   type LiveSessionConfigInput,
-} from '../gemini/config'
-import type { TokenGrant } from '../sink'
+} from '../gemini/config.js'
+import type { TokenGrant } from '../sink.js'
 
 /**
  * Gemini ephemeral token lifetime.

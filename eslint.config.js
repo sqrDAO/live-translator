@@ -3,7 +3,7 @@ import js from '@eslint/js'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'node_modules/**', 'examples/**/dist/**', 'examples/**/node_modules/**', '**/._*'] },
+  { ignores: ['dist/**', '.vercel/**', 'node_modules/**', 'examples/**/dist/**', 'examples/**/node_modules/**', '**/._*'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

@@ -36,8 +36,12 @@
         <p class="hint">
           <span id="hint-text">In-memory sink · no cloud service · translations appear as live text</span>
         </p>
+        <!-- Which mic, and is audio actually flowing. Without this a silent or
+             wrong input device is indistinguishable from a broken session:
+             both read "đang dịch" and publish nothing. -->
+        <p class="diag" id="diag" hidden></p>
         <div class="controls">
-          <div class="spacer"></div>
+          <select id="device" class="mic-select" aria-label="Microphone"></select>
           <button class="mic" id="mic" aria-label="Start translating">
             <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true">
               <path

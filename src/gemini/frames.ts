@@ -68,19 +68,24 @@ export async function parseLiveMessage(data: unknown): Promise<ParsedLiveMessage
 }
 
 /**
- * The model's translation, under `responseModalities: ['TEXT']`.
+ * The model's translation.
  *
- * It arrives as `modelTurn.parts[].text`. `outputAudioTranscription` — which
- * this once read exclusively — transcribes the model's *audio*, so it is
- * simply absent under a TEXT modality: reading only that field left
- * `outputText` unset on every frame, and `UtteranceMerger.build()` refuses an
- * utterance with no translation, so every turn retired as a retract and the
- * feed published nothing at all. The suite could not see it, because every
- * frame it fed was hand-authored in the audio shape.
+ * PROBED 2026-08-24 against `gemini-3.5-live-translate-preview`, and the
+ * result inverts what this comment used to claim: **the translation arrives
+ * as `outputTranscription`, and `modelTurn.parts[]` carry `inlineData` audio
+ * with no `text` at all.** The pinned `responseModalities: ['TEXT']` is
+ * accepted by the mint and then ignored by the model, which answers in audio
+ * at 24 kHz and transcribes itself — `outputTranscription` is emitted without
+ * `outputAudioTranscription` ever being requested.
  *
- * `outputTranscription` is still accepted as a fallback. ADR-001: the shape is
- * verified per deployment and has already moved twice, and a deployment
- * configured for AUDIO must keep working through this same parser.
+ * So the fallback below is the live path and the `modelTurn` branch above is
+ * currently dead. Both are kept: the earlier extraction shipped a parser that
+ * read one field exclusively, `UtteranceMerger.build()` refuses an utterance
+ * with no translation, and the whole feed published nothing. Reading both
+ * costs one property access and survives the modality moving again.
+ *
+ * ADR-001: the shape has now moved three times. Re-probe per deployment;
+ * `test/` cannot see this, because every frame it feeds is hand-authored.
  */
 function readOutputText(serverContent: Record<string, unknown>): string | undefined {
   const modelTurn = serverContent.modelTurn as { parts?: unknown } | undefined

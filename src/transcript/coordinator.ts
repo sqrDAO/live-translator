@@ -16,14 +16,14 @@
  * the API reintroduces it.
  */
 
-import type { LangTag, LanguageDetector, LanguagePair } from '../lang/types'
-import { assertLanguagePair } from '../lang/types'
+import type { LangTag, LanguageDetector, LanguagePair } from '../lang/types.js'
+import { assertLanguagePair } from '../lang/types.js'
 import {
   UtteranceMerger,
   countSentences,
   type IncomingFragment,
   type MergedUtterance,
-} from './merge'
+} from './merge.js'
 
 export interface TurnMessage {
   inputText?: string
