@@ -1,0 +1,5 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm --prefix examples/memory-host ci && npm --prefix examples/memory-host run build",
+  "outputDirectory": "examples/memory-host/dist"
+}
