@@ -207,6 +207,36 @@ describe('resumption and goAway', () => {
     expect(w.sockets.length).toBe(before + 1)
   })
 
+  it('stops counting the rotating socket as open once it actually closes', async () => {
+    // Silencing the announced close hid it from the derivation entirely:
+    // `openCount` reported both directions up for the whole mint round trip,
+    // so the engine published `live` for a feed with one dead session.
+    vi.useFakeTimers()
+    const w = wire(
+      async (t) =>
+        new Promise((resolve) => setTimeout(() => resolve(grant(`fresh-${t}`)), 5_000)),
+    )
+    await startOpen(w)
+    expect(w.manager.openCount).toBe(2)
+
+    const rotating = w.sockets[0]!
+    rotating.receive({ goAway: { timeLeft: '10s' } })
+    await flush()
+    // Still open: the server has announced the close, not performed it.
+    expect(w.manager.openCount).toBe(2)
+
+    rotating.close({ code: 1001 })
+    expect(w.manager.openCount).toBe(1)
+    expect(w.closes.at(-1)).toMatchObject({ target: enVi.pair[0], code: 1001 })
+
+    // ...and the rotation still completes without spending the budget.
+    await vi.advanceTimersByTimeAsync(5_000)
+    w.sockets.at(-1)!.open()
+    await flush()
+    expect(w.manager.openCount).toBe(2)
+    expect(w.dead).toEqual([])
+  })
+
   it('does not spend the reconnect budget on routine rotations', async () => {
     // caption-session-survives-90-minutes. `goAway` is routine — roughly every
     // ten minutes per connection — so nine of them is a ~90-minute session.

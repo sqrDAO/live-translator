@@ -327,12 +327,24 @@ export class LiveSessionManager<G extends TokenGrant = TokenGrant> {
       this.noteTargetDead(target, 'authority-lapsed')
       return
     }
-    // The close the server just announced is no longer news. Silencing this
-    // socket's handler is what keeps it from re-entering the failure path
-    // during the mint, before `openSession`'s `detachSessions` would have
-    // detached it anyway.
+    // The announced close is no longer a *failure* — but it is still a close,
+    // and the derivation must see it. Nulling the handler outright hid it:
+    // `session.open` stayed true through the mint (and through the whole
+    // backoff ladder if the mint failed), so `openCount` reported both
+    // directions up and the heartbeat published `live` for a feed with one
+    // dead session. Replace the handler instead of removing it: mark the
+    // socket down and report it, but never re-enter the failure path.
     for (const session of this.sessions) {
-      if (session.target === target) session.socket.onclose = null
+      if (session.target !== target) continue
+      session.socket.onclose = (event?: CloseEvent) => {
+        session.open = false
+        if (this.stopped) return
+        this.options.onSocketClose({
+          target,
+          ...(typeof event?.code === 'number' ? { code: event.code } : {}),
+          ...(event?.reason ? { reason: event.reason } : {}),
+        })
+      }
     }
     void this.reattach(target)
   }
