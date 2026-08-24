@@ -39,6 +39,17 @@ app.post('/api/token', async (req, res) => {
     return
   }
 
+  // Optional operator-declared direction (caption-direction-control). Absent
+  // means Auto: the session prompt keeps its per-utterance "translate, or
+  // repeat if already in the target" hedge. Present, the model gets one
+  // unconditional job, pinned into this token — which is why changing
+  // direction needs a fresh mint and so a fresh session.
+  const speakerLang = req.body?.speakerLang as LangTag | undefined
+  if (speakerLang !== undefined && speakerLang !== 'en' && speakerLang !== 'vi') {
+    res.status(400).json({ error: 'speakerLang must be "en" or "vi"' })
+    return
+  }
+
   try {
     if (!apiKey) {
       // The localhost-only stub: no key configured, so no real session — but
@@ -60,6 +71,7 @@ app.post('/api/token', async (req, res) => {
       model: MODEL,
       languages: enVi,
       target,
+      ...(speakerLang ? { speakerLang } : {}),
     })
     res.json({ token: grant.token, sessionConfig: grant.sessionConfig })
   } catch (error) {

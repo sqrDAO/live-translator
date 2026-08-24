@@ -50,7 +50,14 @@
               />
             </svg>
           </button>
-          <div class="spacer"></div>
+          <!-- Direction. Auto runs both sessions and infers the speaker's
+               language per utterance; a declared direction is pinned into
+               every minted token, so switching restarts the feed. -->
+          <div class="direction" id="direction" role="group" aria-label="Translation direction">
+            <button type="button" data-dir="auto" aria-pressed="true">AUTO</button>
+            <button type="button" data-dir="en" aria-pressed="false">EN→VI</button>
+            <button type="button" data-dir="vi" aria-pressed="false">VI→EN</button>
+          </div>
         </div>
       </footer>
     </div>

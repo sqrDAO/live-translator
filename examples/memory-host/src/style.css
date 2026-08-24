@@ -368,6 +368,43 @@ body {
 
 .spacer { min-width: 1px; }
 
+/* Direction control. Sits opposite the microphone picker so the two things
+   that decide what the feed hears bracket the button that starts it. */
+.direction {
+  justify-self: end;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-btn);
+}
+
+.direction button {
+  appearance: none;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  color: var(--faint);
+  font-family: var(--font-label);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 6px 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.direction button:hover { color: var(--dim); }
+.direction button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.direction button[aria-pressed='true'] { background: var(--panel-2); color: var(--ink); }
+.direction button[data-dir='en'][aria-pressed='true'] { color: var(--en); }
+.direction button[data-dir='vi'][aria-pressed='true'] { color: var(--vi); }
+
+@media (max-width: 460px) {
+  .direction button { padding: 6px 5px; letter-spacing: 0; }
+}
+
 .mic-select {
   justify-self: start;
   max-width: 200px;

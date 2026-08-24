@@ -4,12 +4,26 @@ import {
   DEFAULT_DEVICE_STORAGE_KEY,
   LiveTranslateEngine,
   type CaptureDiagnostics,
+  type LangTag,
   type MintToken,
   type TokenGrant,
 } from '@sqrdao/live-translate'
 import { enVi } from '@sqrdao/live-translate/lang/en-vi'
 
 import { MemorySink, type StoredUtterance } from './memory-sink'
+
+/**
+ * The operator-declared speaker language, or `null` for Auto.
+ *
+ * Auto runs both sessions and lets the engine infer the source per utterance,
+ * which is right for a two-way conversation and wrong for a talk: one
+ * mislabelled utterance puts a caption on the wrong side of the pair. A
+ * declared direction removes the inference — the engine labels every
+ * utterance with it, and the token pins the model to a single unconditional
+ * job (`speakerLang` in the session prompt) instead of deciding per turn
+ * whether to translate or repeat.
+ */
+let speakerLang: LangTag | null = null
 
 /**
  * The host's authorization hook. The engine calls it once per target at
@@ -20,7 +34,11 @@ const mintToken: MintToken = async (target): Promise<TokenGrant> => {
   const response = await fetch('/api/token', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ target }),
+    // The declared direction travels with every mint, including the ones the
+    // engine makes on reconnect: the session prompt is pinned into the token,
+    // so a reconnect that forgot it would silently return that half of the
+    // feed to Auto mid-session.
+    body: JSON.stringify({ target, ...(speakerLang ? { speakerLang } : {}) }),
   })
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
@@ -44,6 +62,7 @@ const statusText = $('#status-text')
 const micBtn = $<HTMLButtonElement>('#mic')
 const deviceSel = $<HTMLSelectElement>('#device')
 const diagEl = $('#diag')
+const directionEl = $('#direction')
 
 const STATUS_LABEL: Record<string, string> = {
   idle: 'sẵn sàng',
@@ -101,18 +120,34 @@ let lastPaintedAt = 0
  * into a socket that is not there. `frames` separates that from a session
  * that is connected and simply has nothing to say.
  */
-const wire = { sockets: 0, frames: 0, closes: 0, lastClose: '' }
+type Wire = { sockets: number; frames: number; closes: number; lastClose: string }
+const freshWire = (): Wire => ({ sockets: 0, frames: 0, closes: 0, lastClose: '' })
+
+/**
+ * Counted per run, and each socket reports only to the run that opened it.
+ *
+ * Stopping an engine closes its sockets, and those close events land *after*
+ * the next run has started — so a single shared counter charged the previous
+ * session's teardown to the new one. Switching direction restarts the feed,
+ * which made the panel greet every switch with "⚠ 2 closes" for a session
+ * whose sockets were both healthy: the one line an operator consults to tell
+ * a dead feed from a quiet one, reporting the wrong session's death.
+ */
+let wire = freshWire()
 
 function createSocket(url: string): WebSocket {
   const socket = new WebSocket(url)
-  wire.sockets += 1
+  const run = wire
+  run.sockets += 1
   socket.addEventListener('message', () => {
-    wire.frames += 1
+    if (run !== wire) return
+    run.frames += 1
     paint()
   })
   socket.addEventListener('close', (event) => {
-    wire.closes += 1
-    wire.lastClose = `${event.code}${event.reason ? ` ${event.reason}` : ''}`
+    if (run !== wire) return
+    run.closes += 1
+    run.lastClose = `${event.code}${event.reason ? ` ${event.reason}` : ''}`
     paint(true)
   })
   return socket
@@ -219,16 +254,16 @@ function start(): void {
   feed.replaceChildren(empty)
   empty.classList.remove('hidden')
 
-  // Auto direction: two sessions, the engine decides the source per utterance.
-  wire.sockets = 0
-  wire.frames = 0
-  wire.closes = 0
-  wire.lastClose = ''
+  // Two sessions either way. In Auto the engine decides the source per
+  // utterance; with a declared direction it is told, and so is the model.
+  wire = freshWire()
   engine = new LiveTranslateEngine({
     languages: enVi,
     sink,
     mintToken,
     createSocket,
+    // Fixed for this engine's lifetime, which is why changing it restarts.
+    ...(speakerLang ? { forcedSourceLang: speakerLang } : {}),
     onSocketClose: (info) => console.warn('[socket closed]', info),
     onError: (error) => {
       console.error(error)
@@ -262,3 +297,33 @@ micBtn.addEventListener('click', () => {
   if (running) void stop()
   else start()
 })
+
+function renderDirection(): void {
+  for (const button of directionEl.querySelectorAll<HTMLButtonElement>('button[data-dir]')) {
+    const selected = (button.dataset.dir === 'auto' ? null : button.dataset.dir) === speakerLang
+    button.setAttribute('aria-pressed', String(selected))
+  }
+}
+
+directionEl.addEventListener('click', (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-dir]')
+  if (!button) return
+  const chosen = button.dataset.dir === 'auto' ? null : (button.dataset.dir as LangTag)
+  if (chosen === speakerLang) return
+  speakerLang = chosen
+  renderDirection()
+
+  // The direction is pinned into every token this feed already minted, so a
+  // running engine cannot adopt it: the sessions would keep the prompt they
+  // opened with while the captions carried the new label. Tear down and
+  // rebuild — the feed clears and both sessions re-mint.
+  if (running) {
+    void stop().then(() => {
+      // A tap on the mic during the teardown owns the decision; only restart
+      // if nothing else did.
+      if (!running) start()
+    })
+  }
+})
+
+renderDirection()

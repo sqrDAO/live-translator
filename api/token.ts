@@ -29,7 +29,7 @@ export interface TokenEndpointResult {
 type Mint = (input: MintSessionTokenInput) => Promise<SessionTokenGrant>
 
 /** Vercel parses a JSON body for us; a raw string is still accepted. */
-function readTarget(body: unknown): LangTag | null {
+function parseBody(body: unknown): { target?: unknown; speakerLang?: unknown } | null {
   let parsed = body
   if (typeof parsed === 'string') {
     try {
@@ -38,9 +38,13 @@ function readTarget(body: unknown): LangTag | null {
       return null
     }
   }
-  const target = (parsed as { target?: unknown } | null | undefined)?.target
-  if (target === 'en') return 'en'
-  if (target === 'vi') return 'vi'
+  if (!parsed || typeof parsed !== 'object') return null
+  return parsed as { target?: unknown; speakerLang?: unknown }
+}
+
+function readLang(value: unknown): LangTag | null {
+  if (value === 'en') return 'en'
+  if (value === 'vi') return 'vi'
   return null
 }
 
@@ -59,9 +63,24 @@ export async function handleTokenRequest(input: {
     return { status: 405, body: { error: 'method not allowed' } }
   }
 
-  const target = readTarget(input.body)
+  const body = parseBody(input.body)
+  const target = readLang(body?.target)
   if (!target) {
     return { status: 400, body: { error: 'target must be "en" or "vi"' } }
+  }
+
+  // Optional: the operator-declared speaker language
+  // (caption-direction-control). Absent means Auto, and the session prompt
+  // keeps its per-utterance "translate, or repeat if already in the target"
+  // hedge. Present, it pins one unconditional job into the token.
+  //
+  // A value that is neither language is a 400 rather than a silent fall back
+  // to Auto: the caller asked for a direction, and a feed that quietly went
+  // back to guessing would look exactly like one that had not.
+  const declared = body?.speakerLang
+  const speakerLang = declared === undefined || declared === null ? null : readLang(declared)
+  if (declared !== undefined && declared !== null && !speakerLang) {
+    return { status: 400, body: { error: 'speakerLang must be "en" or "vi"' } }
   }
 
   if (!input.apiKey) {
@@ -88,6 +107,7 @@ export async function handleTokenRequest(input: {
       model: input.model,
       languages: enVi,
       target,
+      ...(speakerLang ? { speakerLang } : {}),
     })
     return { status: 200, body: { token: grant.token, sessionConfig: grant.sessionConfig } }
   } catch (error) {
