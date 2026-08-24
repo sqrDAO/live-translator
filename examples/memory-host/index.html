@@ -7,28 +7,35 @@
     <link rel="icon" href="/icons/icon-192.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- The system's three faces: Instrument Sans for everything typographic,
+         IBM Plex Mono for uppercase labels and metadata, JetBrains Mono for
+         actual code — here, the diagnostics readout. -->
     <link
-      href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=JetBrains+Mono:wght@400;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=IBM+Plex+Mono:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap"
       rel="stylesheet"
     />
     <title>live-translate — memory host</title>
   </head>
   <body>
+    <a class="skip" href="#feed">Skip to transcript</a>
     <div class="stage">
       <header class="top">
-        <h1 class="wordmark">
-          Phiên&nbsp;dịch <em>live</em>
-          <span class="pair"><b class="en">EN</b><i>⇄</i><b class="vi">VI</b></span>
-        </h1>
-        <div class="status" id="status" data-state="idle">
-          <span class="dot"></span><span id="status-text">sẵn sàng</span>
+        <div class="brand">
+          <span class="eyebrow">sqrDAO · live-translate</span>
+          <h1 class="wordmark">Phiên&nbsp;dịch <em>live</em></h1>
+        </div>
+        <div class="meta">
+          <span class="pair"><b class="vi">VI</b><i>⇄</i><b class="en">EN</b></span>
+          <div class="status" id="status" data-state="idle">
+            <span class="dot"></span><span id="status-text">sẵn sàng</span>
+          </div>
         </div>
       </header>
 
-      <main class="feed" id="feed">
+      <main class="feed" id="feed" tabindex="-1">
         <div class="empty" id="empty">
           <p class="empty-vi">Nhấn nút mic để bắt đầu</p>
-          <p class="empty-en">tap the microphone to start — reference host for @sqrdao/live-translate</p>
+          <p class="empty-en eyebrow">tap the microphone to start</p>
         </div>
       </main>
 
