@@ -15,7 +15,7 @@
  * ordering stay in the engine — and the sink decides *where* and *whether*.
  */
 
-import type { LangTag } from './lang/types'
+import type { LangTag } from './lang/types.js'
 
 /** Feed lifecycle as the engine reports it, in the order a feed passes through it. */
 export type FeedStatus = 'idle' | 'connecting' | 'live' | 'degraded' | 'unavailable' | 'closed'

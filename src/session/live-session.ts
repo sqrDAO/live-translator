@@ -14,15 +14,15 @@
  * README disagrees with what the API does when probed, the API wins.
  */
 
-import type { LangTag, LanguagePair } from '../lang/types'
-import { assertLanguagePair } from '../lang/types'
-import { parseLiveMessage, type ParsedLiveMessage } from '../gemini/frames'
+import type { LangTag, LanguagePair } from '../lang/types.js'
+import { assertLanguagePair } from '../lang/types.js'
+import { parseLiveMessage, type ParsedLiveMessage } from '../gemini/frames.js'
 import {
   isPublicationMoved,
   type FeedDeathReason,
   type MintToken,
   type TokenGrant,
-} from '../sink'
+} from '../sink.js'
 
 /**
  * `BidiGenerateContentConstrained`, not `BidiGenerateContent`: ephemeral

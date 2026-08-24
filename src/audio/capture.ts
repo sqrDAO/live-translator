@@ -25,8 +25,8 @@ import {
   VoiceActivityDetector,
   floatToPcm16,
   pcm16ToBase64,
-} from './pcm'
-import { WORKLET_SOURCE, WORKLET_NAME } from './worklet'
+} from './pcm.js'
+import { WORKLET_SOURCE, WORKLET_NAME } from './worklet.js'
 
 /** One 100 ms chunk of pure digital silence — what a gated chunk becomes. */
 const SILENCE_CHUNK_BASE64 = pcm16ToBase64(new Int16Array(SAMPLES_PER_CHUNK))

@@ -21,8 +21,8 @@
  * sink).
  */
 
-import type { LangTag, LanguageDetector, LanguagePair } from '../lang/types'
-import { otherOf } from '../lang/types'
+import type { LangTag, LanguageDetector, LanguagePair } from '../lang/types.js'
+import { otherOf } from '../lang/types.js'
 
 export interface IncomingFragment {
   utteranceId: string

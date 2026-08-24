@@ -20,7 +20,7 @@ export {
   type EngineStartOptions,
   type LatencyReport,
   type MicrophoneOptions,
-} from './engine'
+} from './engine.js'
 
 export {
   PublicationMovedError,
@@ -31,7 +31,7 @@ export {
   type MintToken,
   type PublishableUtterance,
   type TokenGrant,
-} from './sink'
+} from './sink.js'
 
 export {
   assertLanguagePair,
@@ -41,7 +41,7 @@ export {
   type LanguageNames,
   type LanguagePack,
   type LanguagePair,
-} from './lang/types'
+} from './lang/types.js'
 
 export {
   AudioCapture,
@@ -49,7 +49,7 @@ export {
   stopSupersededCapture,
   type CaptureDiagnostics,
   type CaptureOptions,
-} from './audio/capture'
+} from './audio/capture.js'
 export {
   CHUNK_MS,
   ChunkAccumulator,
@@ -60,8 +60,8 @@ export {
   VoiceActivityDetector,
   floatToPcm16,
   pcm16ToBase64,
-} from './audio/pcm'
-export { WORKLET_NAME, WORKLET_SOURCE } from './audio/worklet'
+} from './audio/pcm.js'
+export { WORKLET_NAME, WORKLET_SOURCE } from './audio/worklet.js'
 
 export {
   TURN_SILENCE_MS,
@@ -70,8 +70,8 @@ export {
   buildTokenConstraints,
   type LiveSessionConfigInput,
   type LiveSessionContext,
-} from './gemini/config'
-export { parseLiveMessage, type ParsedLiveMessage } from './gemini/frames'
+} from './gemini/config.js'
+export { parseLiveMessage, type ParsedLiveMessage } from './gemini/frames.js'
 
 export {
   LIVE_ENDPOINT,
@@ -80,15 +80,15 @@ export {
   RECONNECT_MAX_ATTEMPTS,
   type LiveSessionManagerOptions,
   type SocketCloseInfo,
-} from './session/live-session'
+} from './session/live-session.js'
 
 export {
   TargetTurnCoordinator,
   type TargetTurnCoordinatorOptions,
   type TurnMessage,
   type TurnPublication,
-} from './transcript/coordinator'
-export { LatencyTracker, type LatencySnapshot } from './transcript/latency'
+} from './transcript/coordinator.js'
+export { LatencyTracker, type LatencySnapshot } from './transcript/latency.js'
 export {
   UtteranceMerger,
   countSentences,
@@ -96,6 +96,6 @@ export {
   type IncomingFragment,
   type MergedUtterance,
   type UtteranceMergerOptions,
-} from './transcript/merge'
-export { PublicationOutbox, type PublicationOutboxOptions } from './transcript/outbox'
-export { WriteThrottle, type ThrottleOptions } from './transcript/throttle'
+} from './transcript/merge.js'
+export { PublicationOutbox, type PublicationOutboxOptions } from './transcript/outbox.js'
+export { WriteThrottle, type ThrottleOptions } from './transcript/throttle.js'

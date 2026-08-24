@@ -11,7 +11,7 @@
  * session it opens, and an operator diagnostics panel may display it.
  */
 
-import { assertLanguagePair, otherOf, type LangTag, type LanguagePack } from '../lang/types'
+import { assertLanguagePair, otherOf, type LangTag, type LanguagePack } from '../lang/types.js'
 
 /**
  * Silence the model requires before it ends a turn.
