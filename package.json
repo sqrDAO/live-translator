@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Host-agnostic live speech translation engine: browser audio in, merged bilingual utterances out, over two Gemini Live sessions.",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "sideEffects": false,
   "engines": {
@@ -10,7 +11,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "exports": {
     ".": {

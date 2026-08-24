@@ -15,13 +15,11 @@ constant and every counter-intuitive branch exists because a real room broke
 without it; the comments that explain them are the incident history and are
 load-bearing.
 
-> **Status — two decisions belong to a human, not to this code (unresolved).**
-> The scaffold uses the *proposed* name `@sqrdao/live-translate`, semver from
-> `0.1.0`, and is **published nowhere** (git or workspace resolution only).
-> There is deliberately **no `LICENSE` file**: the engine's later half was
-> produced under a client engagement, and whether that output is sqrDAO IP,
-> client work-product, or shared decides whether it may be reused and under
-> what licence. Settle ownership/licence and the final name/scope before
+> **Status — licensed MIT; the name is still provisional.**
+> Licensed under the [MIT License](LICENSE), copyright sqrDAO and
+> contributors. The scaffold uses the *proposed* name
+> `@sqrdao/live-translate`, semver from `0.1.0`, and is **published nowhere**
+> (git or workspace resolution only). Confirm the final name/scope before
 > publishing anywhere. See “Open decisions” below.
 
 ## The boundary
@@ -165,16 +163,14 @@ identifiers, storage and console left behind.
 
 ## Open decisions
 
-Neither is this code's to settle:
+Not this code's to settle:
 
-1. **Ownership and licence.** The engine's later half was produced under a
-   client engagement. Whether it is sqrDAO IP, client work-product, or shared
-   decides whether it may be reused and under what licence. This is a contract
-   question. Until it is answered there is no `LICENSE` file and nothing is
-   published.
-2. **Name, scope and home.** Proposed `@sqrdao/live-translate`, semver from
+1. **Name, scope and home.** Proposed `@sqrdao/live-translate`, semver from
    `0.1.0`; in-repo/workspace first, split to its own repository when a second
    project actually needs it. Confirm before publishing anywhere.
+
+Settled: **ownership and licence** — MIT, copyright sqrDAO and contributors.
+See [`LICENSE`](LICENSE).
 
 ## Development
 
