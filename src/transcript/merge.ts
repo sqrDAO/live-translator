@@ -211,6 +211,15 @@ export class UtteranceMerger {
   private readonly pair: LanguagePair
   private readonly detect: LanguageDetector
 
+  /**
+   * Drops every accumulated fragment. A stopped feed's half-heard speech is
+   * not the next session's to publish.
+   */
+  reset(): void {
+    this.fragments.clear()
+    this.startedAt.clear()
+  }
+
   constructor(private readonly options: UtteranceMergerOptions) {
     this.pair = options.pair
     this.detect = options.detect

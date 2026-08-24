@@ -93,7 +93,7 @@ describe('ephemeral token constraints — the exact wire shape', () => {
     })
   })
 
-  it('pins the authorized modality and both transcriptions', () => {
+  it('pins the authorized modality and the input transcription', () => {
     const setup = constraints.bidiGenerateContentSetup as {
       generationConfig?: { responseModalities?: string[] }
       inputAudioTranscription?: unknown
@@ -101,7 +101,10 @@ describe('ephemeral token constraints — the exact wire shape', () => {
     }
     expect(setup.generationConfig?.responseModalities).toEqual(['TEXT'])
     expect(setup.inputAudioTranscription).toEqual({})
-    expect(setup.outputAudioTranscription).toEqual({})
+    // A TEXT session emits no audio, so an output-audio transcription would be
+    // a dead field pinned into every minted token — and reading it instead of
+    // `modelTurn.parts[].text` is what once left the feed publishing nothing.
+    expect(setup).not.toHaveProperty('outputAudioTranscription')
   })
 })
 

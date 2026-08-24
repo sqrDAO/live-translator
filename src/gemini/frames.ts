@@ -58,11 +58,42 @@ export async function parseLiveMessage(data: unknown): Promise<ParsedLiveMessage
   if (!serverContent) return null
 
   const input = serverContent.inputTranscription as { text?: string } | undefined
-  const output = serverContent.outputTranscription as { text?: string } | undefined
+  const outputText = readOutputText(serverContent)
 
   return {
     ...(input?.text ? { inputText: input.text } : {}),
-    ...(output?.text ? { outputText: output.text } : {}),
+    ...(outputText ? { outputText } : {}),
     ...(serverContent.turnComplete ? { turnComplete: true } : {}),
   }
+}
+
+/**
+ * The model's translation, under `responseModalities: ['TEXT']`.
+ *
+ * It arrives as `modelTurn.parts[].text`. `outputAudioTranscription` — which
+ * this once read exclusively — transcribes the model's *audio*, so it is
+ * simply absent under a TEXT modality: reading only that field left
+ * `outputText` unset on every frame, and `UtteranceMerger.build()` refuses an
+ * utterance with no translation, so every turn retired as a retract and the
+ * feed published nothing at all. The suite could not see it, because every
+ * frame it fed was hand-authored in the audio shape.
+ *
+ * `outputTranscription` is still accepted as a fallback. ADR-001: the shape is
+ * verified per deployment and has already moved twice, and a deployment
+ * configured for AUDIO must keep working through this same parser.
+ */
+function readOutputText(serverContent: Record<string, unknown>): string | undefined {
+  const modelTurn = serverContent.modelTurn as { parts?: unknown } | undefined
+  if (Array.isArray(modelTurn?.parts)) {
+    // Concatenated, not first-wins: one frame can carry several text parts,
+    // and each is a delta the merge accumulates. Non-text parts (inline audio
+    // under a mixed modality) are skipped rather than stringified.
+    const text = modelTurn.parts
+      .map((part) => (part as { text?: unknown } | null)?.text)
+      .filter((value): value is string => typeof value === 'string')
+      .join('')
+    if (text) return text
+  }
+  const transcription = serverContent.outputTranscription as { text?: string } | undefined
+  return transcription?.text || undefined
 }

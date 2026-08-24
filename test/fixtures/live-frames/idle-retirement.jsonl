@@ -1,7 +1,7 @@
 # No turnComplete from either direction — the real shape of the current
 # protocol. Idle retirement is the only turn boundary: each ~2 s gap must
 # publish the finished utterance and open the next.
-{"atMs": 0, "target": "en", "frame": {"serverContent": {"inputTranscription": {"text": "Sentence zero"}, "outputTranscription": {"text": "Sentence zero"}}}}
-{"atMs": 100, "target": "vi", "frame": {"serverContent": {"inputTranscription": {"text": "Sentence zero"}, "outputTranscription": {"text": "Câu không"}}}}
-{"atMs": 5000, "target": "en", "frame": {"serverContent": {"inputTranscription": {"text": "Sentence one"}, "outputTranscription": {"text": "Sentence one"}}}}
-{"atMs": 5100, "target": "vi", "frame": {"serverContent": {"inputTranscription": {"text": "Sentence one"}, "outputTranscription": {"text": "Câu một"}}}}
+{"atMs": 0, "target": "en", "frame": {"serverContent": {"inputTranscription": {"text": "Sentence zero"}, "modelTurn": {"parts": [{"text": "Sentence zero"}]}}}}
+{"atMs": 100, "target": "vi", "frame": {"serverContent": {"inputTranscription": {"text": "Sentence zero"}, "modelTurn": {"parts": [{"text": "Câu không"}]}}}}
+{"atMs": 5000, "target": "en", "frame": {"serverContent": {"inputTranscription": {"text": "Sentence one"}, "modelTurn": {"parts": [{"text": "Sentence one"}]}}}}
+{"atMs": 5100, "target": "vi", "frame": {"serverContent": {"inputTranscription": {"text": "Sentence one"}, "modelTurn": {"parts": [{"text": "Câu một"}]}}}}

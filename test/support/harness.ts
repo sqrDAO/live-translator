@@ -178,12 +178,19 @@ export async function start(
   return [vi, en]
 }
 
-/** A Live frame carrying an input transcript, an output transcript, or both. */
+/**
+ * A Live frame carrying an input transcript, the model's translation, or both.
+ *
+ * The translation is a `modelTurn` text part — the shape a TEXT-modality
+ * session actually sends. It used to be authored as `outputTranscription`,
+ * which is the audio-modality shape, and that mismatch hid a defect where the
+ * engine parsed nothing and published nothing.
+ */
 export function liveMessage(input: string, output: string, turnComplete = false): Record<string, unknown> {
   return {
     serverContent: {
       ...(input ? { inputTranscription: { text: input } } : {}),
-      ...(output ? { outputTranscription: { text: output } } : {}),
+      ...(output ? { modelTurn: { parts: [{ text: output }] } } : {}),
       ...(turnComplete ? { turnComplete: true } : {}),
     },
   }

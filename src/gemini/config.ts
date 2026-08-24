@@ -208,10 +208,14 @@ export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<st
         },
       ],
     },
-    // Both transcriptions are requested. The output transcription is the
-    // session discriminator used to infer the source language.
+    // The input transcription is what the speaker actually said; the model's
+    // translation comes back as `modelTurn.parts[].text` under the TEXT
+    // modality above, and the two together are the session discriminator used
+    // to infer the source language. `outputAudioTranscription` is deliberately
+    // NOT requested: it transcribes the model's *audio*, of which a TEXT
+    // session produces none, so it only ever added a dead field to a config
+    // the ephemeral token pins verbatim.
     inputAudioTranscription: {},
-    outputAudioTranscription: {},
     realtimeInputConfig: {
       automaticActivityDetection: {
         // The engine already gates on its own adaptive noise floor, so the

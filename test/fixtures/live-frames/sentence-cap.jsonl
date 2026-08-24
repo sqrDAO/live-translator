@@ -1,5 +1,5 @@
 # A conversation that never leaves a 1.5 s gap is capped at three sentences.
 # The fragment completing the third sentence retires the turn as final.
-{"atMs": 0, "target": "en", "frame": {"serverContent": {"inputTranscription": {"text": "Câu một."}, "outputTranscription": {"text": "One."}}}}
-{"atMs": 200, "target": "en", "frame": {"serverContent": {"inputTranscription": {"text": " Câu hai."}, "outputTranscription": {"text": " Two."}}}}
-{"atMs": 400, "target": "en", "frame": {"serverContent": {"inputTranscription": {"text": " Câu ba."}, "outputTranscription": {"text": " Three."}}}}
+{"atMs": 0, "target": "en", "frame": {"serverContent": {"inputTranscription": {"text": "Câu một."}, "modelTurn": {"parts": [{"text": "One."}]}}}}
+{"atMs": 200, "target": "en", "frame": {"serverContent": {"inputTranscription": {"text": " Câu hai."}, "modelTurn": {"parts": [{"text": " Two."}]}}}}
+{"atMs": 400, "target": "en", "frame": {"serverContent": {"inputTranscription": {"text": " Câu ba."}, "modelTurn": {"parts": [{"text": " Three."}]}}}}

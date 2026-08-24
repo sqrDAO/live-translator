@@ -184,7 +184,12 @@ export class AudioCapture {
       this.diagnostics.contextSampleRate = context.sampleRate
       this.emitDiagnostics(options, true)
     } catch (error) {
-      if (generation !== this.generation) return
+      // Superseded *and* failed. The early return skipped the release the
+      // three generation checks above all perform, so a start that got its
+      // stream and then threw — a rejected `resume()`, a worklet that would
+      // not load — left those tracks running with `this.stream` already
+      // pointing at the winner: a live microphone nothing could stop.
+      if (generation !== this.generation) return void this.releaseStream(stream)
       options.onError(error instanceof Error ? error : new Error(String(error)))
       await this.stop()
     }

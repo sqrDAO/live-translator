@@ -34,7 +34,9 @@ class FakeAudioContext {
   destination = {}
   // Parks every start just past the point this test cares about: the stream is
   // assigned, the graph is not yet built.
-  audioWorklet = { addModule: () => new Promise<void>(() => {}) }
+  audioWorklet: { addModule: () => Promise<void> } = {
+    addModule: () => new Promise<void>(() => {}),
+  }
   async resume(): Promise<void> {}
   async close(): Promise<void> {
     this.state = 'closed'
@@ -70,6 +72,54 @@ afterEach(() => {
 })
 
 describe('a superseded start never disposes the capture that replaced it', () => {
+  it('releases its own stream when it is superseded AND throws', async () => {
+    // The catch returned early on a stale generation without releasing. Start
+    // #1 must therefore get past the first generation check (so it owns the
+    // field), be superseded, and only then fail — a worklet that will not load
+    // — leaving its tracks running while `this.stream` points at the winner.
+    const first = fakeStream('first')
+    const second = fakeStream('second')
+    const getUserMedia = vi
+      .fn<(c: unknown) => Promise<unknown>>()
+      .mockImplementationOnce(async () => first)
+      .mockImplementationOnce(async () => second)
+
+    // One controllable module load per start, so #1 can be failed after #2 has
+    // taken over.
+    const rejecters: Array<(reason: Error) => void> = []
+    installBrowserGlobals(getUserMedia)
+    class FailableContext extends FakeAudioContext {
+      override audioWorklet = {
+        addModule: () =>
+          new Promise<void>((_resolve, reject) => {
+            rejecters.push(reject)
+          }),
+      }
+    }
+    vi.stubGlobal('window', {
+      AudioContext: FailableContext,
+      localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    })
+
+    const capture = new AudioCapture()
+    void capture.start(options())
+    await settle()
+    expect(rejecters).toHaveLength(1) // #1 is parked past its stream assignment
+
+    void capture.start(options())
+    await settle()
+    expect(rejecters).toHaveLength(2) // #2 has taken over
+
+    rejecters[0]!(new Error('worklet failed to load'))
+    await settle()
+
+    expect(first.tracks[0]!.stop).toHaveBeenCalled()
+    expect(second.tracks[0]!.stop).not.toHaveBeenCalled()
+
+    await capture.stop()
+    expect(second.tracks[0]!.stop).toHaveBeenCalled()
+  })
+
   it('leaves the winning stream stoppable when the loser settles last', async () => {
     // The operator double-taps Begin (the case `generation` exists for).
     // `getUserMedia` settles in no guaranteed order, so start#1 comes back

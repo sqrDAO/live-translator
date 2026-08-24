@@ -8,8 +8,11 @@ A record is one JSON object per line:
 - `{ "atMs": <n>, "target": "<lang>", "frame": { … } }` — deliver a Live API
   frame to that target's open socket at `atMs` on the fake clock. `frame` is the
   raw shape `parseLiveMessage` reads: `serverContent.inputTranscription`,
-  `serverContent.outputTranscription`, `serverContent.turnComplete`,
-  `sessionResumptionUpdate`, `goAway`.
+  `serverContent.modelTurn.parts[].text` (the model's translation under the
+  pinned TEXT modality), `serverContent.turnComplete`, `sessionResumptionUpdate`,
+  `goAway`. These were once authored with `outputTranscription` — the
+  audio-modality shape — which is exactly how the engine came to parse nothing
+  and publish nothing without a single test failing.
 - `{ "atMs": <n>, "close": { "target": "<lang>", "code": <n> } }` — a
   server-initiated close of that target's socket.
 - `{ "atMs": <n>, "reopen": { "target": "<lang>" } }` — open the socket a

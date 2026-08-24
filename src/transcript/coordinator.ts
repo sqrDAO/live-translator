@@ -94,6 +94,24 @@ export class TargetTurnCoordinator {
     })
   }
 
+  /**
+   * Drops every open turn and its fragments, for a feed that has stopped.
+   *
+   * Without it, turns still open at `stop()` kept their `TurnState` and their
+   * accumulated text, and the next `start()` published them: the first idle
+   * poll found them quiet, retired them as finals, and the new session opened
+   * with speech from before the operator pressed stop, carrying pre-stop
+   * timestamps.
+   *
+   * The cursors are deliberately NOT rewound. They are what utterance ids are
+   * built from, and a host that has not purged its surface must never see an
+   * id from the last run reused for different words.
+   */
+  reset(): void {
+    this.turns.clear()
+    this.merger.reset()
+  }
+
   accept(target: LangTag, message: TurnMessage, now: number): TurnPublication[] {
     if (!message.inputText && !message.outputText && !message.turnComplete) return []
 

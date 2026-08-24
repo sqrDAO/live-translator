@@ -311,6 +311,12 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
   }
 
   async start(startOptions: EngineStartOptions<G> = {}): Promise<void> {
+    // A host that starts twice without an intervening stop — a double-tapped
+    // Begin, the same race `AudioCapture` hardens against — otherwise orphaned
+    // the previous pair of intervals: nothing held their handles any more, so
+    // they ran for the life of the page, doubling the status heartbeat and
+    // running the idle poll twice per tick forever.
+    this.clearTimers()
     this.stopped = false
     // A new session does not inherit the last one's store trouble.
     this.writeFailing = false
@@ -387,6 +393,13 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
     this.clearTimers()
     this.clearPendingPartial()
     this.outbox.discardSegments()
+    // The transcript state goes too. Left loaded, the next session's first
+    // idle poll retired the turns still open here and published them as its
+    // own opening captions; `published`/`retracted` likewise carried ids the
+    // next run could retract out from under a host that had already purged.
+    this.coordinator.reset()
+    this.published.clear()
+    this.retracted.clear()
 
     // The feed says it ended rather than freezing on its last line. Terminal,
     // so it bypasses the interval too — `stop()` awaits this, and waiting out

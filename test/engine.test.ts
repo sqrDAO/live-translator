@@ -317,6 +317,56 @@ describe('latency measurement', () => {
   })
 })
 
+describe('a restarted engine does not carry the last session forward', () => {
+  it('does not publish the previous session\'s open turn into the next one', async () => {
+    // The coordinator kept every turn still open at stop(), with its
+    // fragments. On the next start the first idle poll found them quiet,
+    // retired them as finals, and the new session opened with speech from
+    // before the operator pressed stop, carrying pre-stop timestamps.
+    vi.useFakeTimers()
+    const { engine, sink } = makeHarness()
+    const [first] = await start(engine)
+    // An utterance left mid-flight: text arrived, no turnComplete, no idle gap.
+    first.receive(liveMessage('Something said before stop', 'Điều gì đó', false))
+    await flush()
+    await engine.stop()
+    sink.published.length = 0
+
+    await start(engine)
+    // Well past the idle threshold: anything the coordinator still held would
+    // have retired by now.
+    await vi.advanceTimersByTimeAsync(10_000)
+    await flush()
+
+    const texts = sink.published.map((p) => p.utterance.original)
+    expect(texts).not.toContain('Something said before stop')
+    expect(sink.published).toHaveLength(0)
+  })
+
+  it('does not leave the previous run\'s heartbeat running after a second start', async () => {
+    // start() twice with no stop orphaned both intervals: nothing held their
+    // handles, so they ran for the life of the page — the status heartbeat
+    // doubled and the idle poll ran twice per tick forever.
+    vi.useFakeTimers()
+    const { engine, sink } = makeHarness()
+    await start(engine)
+    await start(engine)
+    sink.statuses.length = 0
+
+    await vi.advanceTimersByTimeAsync(4_000)
+    await flush()
+    // One heartbeat per interval tick, not two.
+    expect(sink.statuses).toHaveLength(1)
+
+    await engine.stop()
+    sink.statuses.length = 0
+    await vi.advanceTimersByTimeAsync(20_000)
+    await flush()
+    // And stop() reaches every timer that survived the restart.
+    expect(sink.statuses).toHaveLength(0)
+  })
+})
+
 describe('isolation', () => {
   it('keeps two engines\' sinks and measurements apart', async () => {
     const a = makeHarness()
