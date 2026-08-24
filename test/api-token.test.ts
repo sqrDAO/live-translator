@@ -98,3 +98,49 @@ describe('api/token — the deployed mint endpoint', () => {
     expect(written).toEqual([{ status: 405, body: { error: 'method not allowed' } }])
   })
 })
+
+/**
+ * The declared direction (caption-direction-control) has to survive the trip
+ * through the endpoint, because it is the *token* that carries it: the model's
+ * job — translate everything, or repeat everything — is pinned into the
+ * session prompt at mint time. An endpoint that dropped it would leave the
+ * captions labelled with the operator's choice while both sessions went on
+ * guessing per utterance, which is the mislabelling the control exists to end.
+ */
+describe('api/token — the operator-declared direction', () => {
+  it('passes a declared speaker language through to the mint', async () => {
+    const { mint, calls } = stubMint()
+    const result = await handleTokenRequest({ ...ok, body: { target: 'vi', speakerLang: 'en' }, mint })
+
+    expect(result.status).toBe(200)
+    expect(calls[0]!.speakerLang).toBe('en')
+  })
+
+  it('survives a raw JSON string body', async () => {
+    const { mint, calls } = stubMint()
+    const body = JSON.stringify({ target: 'en', speakerLang: 'vi' })
+    expect((await handleTokenRequest({ ...ok, body, mint })).status).toBe(200)
+    expect(calls[0]!.speakerLang).toBe('vi')
+  })
+
+  it('leaves it unset for Auto, so the prompt keeps its per-utterance hedge', async () => {
+    const { mint, calls } = stubMint()
+    for (const body of [{ target: 'vi' }, { target: 'vi', speakerLang: undefined }]) {
+      expect((await handleTokenRequest({ ...ok, body, mint })).status).toBe(200)
+    }
+    // Absent, not merely falsy: `buildLiveSessionConfig` branches on presence.
+    for (const call of calls) expect('speakerLang' in call).toBe(false)
+  })
+
+  it('refuses an unrecognised direction instead of falling back to Auto', async () => {
+    // Silently downgrading would be indistinguishable, from the feed, from a
+    // direction that was honoured — and the operator only reaches for this
+    // control when Auto has already got it wrong.
+    const { mint, calls } = stubMint()
+    for (const speakerLang of ['fr', 'EN', '', 'auto', 1]) {
+      const result = await handleTokenRequest({ ...ok, body: { target: 'vi', speakerLang }, mint })
+      expect(result.status).toBe(400)
+    }
+    expect(calls).toHaveLength(0)
+  })
+})

@@ -121,6 +121,26 @@ const grant = await mintSessionToken({
 })
 ```
 
+### Declaring the direction
+
+By default the engine runs both sessions and infers the speaker's language per
+utterance. That is right for a two-way conversation and wrong for a talk, where
+one mislabelled utterance puts a caption on the wrong side of the pair. A host
+that knows which way the room is speaking declares it, in **both** halves:
+
+```ts
+new LiveTranslateEngine({ /* … */, forcedSourceLang: 'en' })  // labels every utterance 'en'
+mintSessionToken({ /* … */, speakerLang: 'en' })              // pins the model's job
+```
+
+The engine option decides the caption label; `speakerLang` replaces the session
+prompt's per-turn "translate, or repeat if already in the target" hedge with a
+single unconditional instruction. Setting only one of the two is the
+mismatch worth avoiding — captions labelled with the operator's choice while
+the sessions go on guessing. Because the instruction is pinned into the token,
+the declaration must travel with **every** mint, reconnects included, and
+changing it needs a fresh engine.
+
 A full, runnable host — an in-memory sink and a page that captures, translates
 and renders, with **no cloud service of any kind** — is in
 [`examples/memory-host`](./examples/memory-host). Its own test suite runs with

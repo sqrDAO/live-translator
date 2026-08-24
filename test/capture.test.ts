@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { AudioCapture, type CaptureOptions } from '../src/audio/capture'
+import {
+  AudioCapture,
+  DEFAULT_DEVICE_STORAGE_KEY,
+  type CaptureOptions,
+} from '../src/audio/capture'
 
 /**
  * `AudioCapture` against fake browser globals. The suite has no jsdom (see
@@ -157,5 +161,99 @@ describe('a superseded start never disposes the capture that replaced it', () =>
     // stopping the session actually releases the microphone.
     await capture.stop()
     expect(second.tracks[0]!.stop).toHaveBeenCalled()
+  })
+})
+
+/**
+ * What the capture is allowed to remember.
+ *
+ * `deviceId` exists so a venue keeps the mic the operator picked. It was
+ * being written on *every* successful start, from `track.getSettings()` —
+ * including the start that asked for nothing and got the browser default.
+ * That turned one machine's first-run default into a permanent pin: the id
+ * still resolves, so the OverconstrainedError fallback never fires, and the
+ * capture keeps opening a microphone nobody is speaking into while the host's
+ * picker still reads "default microphone". The failure is silent by
+ * construction — a live socket carrying digital silence.
+ */
+describe('the remembered microphone records a choice, never a coincidence', () => {
+  function installWithStorage(
+    getUserMedia: (c: unknown) => Promise<unknown>,
+    store: Map<string, string>,
+  ): void {
+    vi.stubGlobal('window', {
+      AudioContext: FakeAudioContext,
+      localStorage: {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, value),
+        removeItem: (key: string) => void store.delete(key),
+      },
+    })
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } })
+    vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:worklet' })
+  }
+
+  const constrainedId = (constraints: unknown): string | undefined =>
+    (constraints as { audio?: { deviceId?: { exact?: string } } }).audio?.deviceId?.exact
+
+  it('remembers nothing when the host asked for no particular device', async () => {
+    const store = new Map<string, string>()
+    installWithStorage(async () => fakeStream('built-in'), store)
+
+    const capture = new AudioCapture()
+    void capture.start(options())
+    await settle()
+
+    // The regression: `dev-built-in` used to land here, and every later start
+    // then requested it with `{ exact }` instead of following the default.
+    expect(store.size).toBe(0)
+  })
+
+  it('remembers a device the host explicitly selected', async () => {
+    const store = new Map<string, string>()
+    installWithStorage(async () => fakeStream('lectern'), store)
+
+    const capture = new AudioCapture()
+    void capture.start({ ...options(), deviceId: 'dev-lectern' })
+    await settle()
+
+    expect([...store.values()]).toEqual(['dev-lectern'])
+  })
+
+  it('keeps remembering a saved device that is still there', async () => {
+    const store = new Map([[DEFAULT_DEVICE_STORAGE_KEY, 'dev-lectern']])
+    const getUserMedia = vi.fn(async (c: unknown) => {
+      expect(constrainedId(c)).toBe('dev-lectern')
+      return fakeStream('lectern')
+    })
+    installWithStorage(getUserMedia, store)
+
+    const capture = new AudioCapture()
+    void capture.start(options())
+    await settle()
+
+    expect(store.get(DEFAULT_DEVICE_STORAGE_KEY)).toBe('dev-lectern')
+  })
+
+  it('does not re-pin the fallback when the saved device has gone', async () => {
+    // The unplugged-interface path. Clearing the dead id and then immediately
+    // saving whatever the unconstrained retry resolved to would swap one
+    // silent pin for another — and this time for a device the operator has
+    // never once chosen.
+    const store = new Map([[DEFAULT_DEVICE_STORAGE_KEY, 'dev-unplugged']])
+    const getUserMedia = vi.fn(async (c: unknown) => {
+      if (constrainedId(c) === 'dev-unplugged') {
+        throw Object.assign(new Error('gone'), { name: 'OverconstrainedError' })
+      }
+      return fakeStream('built-in')
+    })
+    installWithStorage(getUserMedia, store)
+
+    const capture = new AudioCapture()
+    void capture.start(options())
+    await settle()
+
+    expect(getUserMedia).toHaveBeenCalledTimes(2)
+    expect(store.size).toBe(0)
   })
 })
