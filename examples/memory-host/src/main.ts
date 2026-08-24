@@ -1,6 +1,7 @@
 import './style.css'
 
 import {
+  DEFAULT_DEVICE_STORAGE_KEY,
   LiveTranslateEngine,
   type CaptureDiagnostics,
   type MintToken,
@@ -148,16 +149,34 @@ function paint(force = false): void {
   ].join(' · ')
 }
 
+/** What the engine will actually open when the picker is left on default. */
+function rememberedDevice(): string {
+  try {
+    return window.localStorage.getItem(DEFAULT_DEVICE_STORAGE_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
 /**
  * Device labels are blank until the microphone permission is granted, so this
  * runs again after the first successful start.
+ *
+ * The remembered device is preselected rather than left implicit. The picker
+ * used to read "default microphone" whenever the operator had not touched it
+ * *this page load*, while the engine went on opening a device remembered from
+ * some earlier session — so the one control that says which microphone is in
+ * use disagreed with the microphone in use, in the exact situation where an
+ * operator is staring at it wondering why no captions arrive.
  */
 async function refreshDevices(): Promise<void> {
   if (!navigator.mediaDevices?.enumerateDevices) return
   const devices = await navigator.mediaDevices.enumerateDevices().catch(() => [])
   const mics = devices.filter((d) => d.kind === 'audioinput')
   if (mics.length === 0) return
-  const chosen = deviceSel.value
+  // A remembered id that no longer matches any device leaves the select on
+  // '', which is the truth: the engine's own fallback will take the default.
+  const chosen = deviceSel.value || rememberedDevice()
   deviceSel.replaceChildren(new Option('default microphone', ''))
   for (const mic of mics) {
     deviceSel.add(new Option(mic.label || `microphone ${mic.deviceId.slice(0, 6)}`, mic.deviceId))

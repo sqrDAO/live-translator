@@ -61,7 +61,14 @@ export interface CaptureDiagnostics {
 }
 
 export interface CaptureOptions {
-  /** Preferred device, remembered across restarts. */
+  /**
+   * Preferred device, remembered across restarts.
+   *
+   * Omitting it means "the browser's default", and that stays true on every
+   * later start: only a device named here is written to `storageKey`, so a
+   * host that never passes one never acquires a pinned microphone behind the
+   * operator's back.
+   */
   deviceId?: string
   /**
    * `localStorage` key the remembered microphone is saved under. Namespaced
@@ -144,7 +151,9 @@ export class AudioCapture {
       // shared field first would then stop the *winner's* tracks on its way
       // out and null the field — leaving a live microphone nothing holds and
       // the recording indicator lit for the life of the page.
-      stream = await requestMicrophone(deviceId, this.storageKey)
+      const requested = await requestMicrophone(deviceId, this.storageKey)
+      stream = requested.stream
+      const { pinned } = requested
       if (generation !== this.generation) return void this.releaseStream(stream)
       this.stream = stream
 
@@ -156,7 +165,17 @@ export class AudioCapture {
       if (track) {
         this.diagnostics.microphoneLabel = track.label || 'default'
         const settings = track.getSettings()
-        if (settings.deviceId) saveDevice(this.storageKey, settings.deviceId)
+        // Remember only a device that was actually *asked* for. Saving the id
+        // the browser resolved for an unconstrained request pins whatever
+        // happened to be the system default the first time this origin was
+        // used, and then stops following it: the id keeps existing, so the
+        // OverconstrainedError fallback below never fires, and every later
+        // session opens that same microphone after the operator has moved to
+        // a headset, a USB interface or the room's own desk. Capture then
+        // yields a silent stream with no error — sockets up, frames flowing,
+        // status "live", zero chunks sent and not one caption — while the
+        // picker still reads "default microphone" (fix-remembered-device-pin).
+        if (pinned && settings.deviceId) saveDevice(this.storageKey, settings.deviceId)
       }
 
       await context.audioWorklet.addModule(workletUrl())
@@ -294,14 +313,32 @@ export async function stopSupersededCapture(
   await capture.stop()
 }
 
+interface MicrophoneRequest {
+  stream: MediaStream
+  /**
+   * True only when this stream came back from an explicit `deviceId`
+   * constraint. An unconstrained request resolves to *a* device too, but that
+   * id records a coincidence rather than a choice, and persisting it is what
+   * pinned the picker's "default microphone" to one machine's first-run
+   * default forever.
+   */
+  pinned: boolean
+}
+
 /**
  * Requests the microphone, falling back when the saved device has gone.
  *
  * A USB interface unplugged between sessions makes an exact `deviceId`
  * constraint throw `OverconstrainedError`. The reference implementation retries
- * without the constraint rather than failing the room.
+ * without the constraint rather than failing the room. Note that this rescues
+ * only a device that has *disappeared*; a device that still exists but is no
+ * longer the one being spoken into looks identical to a healthy capture from
+ * here, which is why the caller must not pin one it never chose.
  */
-async function requestMicrophone(deviceId: string | undefined, storageKey: string): Promise<MediaStream> {
+async function requestMicrophone(
+  deviceId: string | undefined,
+  storageKey: string,
+): Promise<MicrophoneRequest> {
   const audio: MediaTrackConstraints = {
     // Text output, not playback: AEC would cancel the room PA we are here to
     // transcribe, and AGC pumps the noise floor between speakers.
@@ -313,9 +350,10 @@ async function requestMicrophone(deviceId: string | undefined, storageKey: strin
 
   if (deviceId) {
     try {
-      return await navigator.mediaDevices.getUserMedia({
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: { ...audio, deviceId: { exact: deviceId } },
       })
+      return { stream, pinned: true }
     } catch (error) {
       const name = (error as { name?: string }).name
       if (name !== 'OverconstrainedError' && name !== 'NotFoundError') throw error
@@ -323,7 +361,7 @@ async function requestMicrophone(deviceId: string | undefined, storageKey: strin
     }
   }
 
-  return navigator.mediaDevices.getUserMedia({ audio })
+  return { stream: await navigator.mediaDevices.getUserMedia({ audio }), pinned: false }
 }
 
 let cachedWorkletUrl: string | null = null
