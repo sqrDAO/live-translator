@@ -1,0 +1,237 @@
+import { describe, expect, it } from 'vitest'
+
+import { detectEnVi, enVi } from '../src/lang/en-vi'
+import type { LanguagePack } from '../src/lang/types'
+import {
+  UtteranceMerger,
+  countSentences,
+  inferSourceLanguage,
+  type IncomingFragment,
+} from '../src/transcript/merge'
+
+const now = 1_760_000_000_000
+
+/** A merger with the bundled EN/VI pack injected — the production behavior. */
+function merger(options: { minCharacters?: number; forcedSourceLang?: string } = {}) {
+  return new UtteranceMerger({ pair: enVi.pair, detect: enVi.detect, ...options })
+}
+
+describe('the EN/VI detector', () => {
+  it('classifies on per-token evidence, abstaining on digits and names', () => {
+    expect(detectEnVi('vào đấy đấy.')).toBe('vi')
+    expect(detectEnVi("That's it.")).toBe('en')
+    expect(detectEnVi('1 2 3 4')).toBeNull()
+    expect(detectEnVi('Techcombank 2026')).toBeNull()
+    expect(detectEnVi('')).toBeNull()
+  })
+
+  it('does not let a Vietnamese proper noun flip an English line', () => {
+    // The prompt orders diacritics preserved, so correct English lines
+    // routinely carry Vietnamese names; any-single-diacritic detection called
+    // these 'vi', tripped the same-language veto, and deleted the correct line.
+    expect(detectEnVi('Welcome to Đà Nẵng')).toBe('en')
+    expect(detectEnVi('the CEO of the bank in Hà Nội')).toBe('en')
+    expect(detectEnVi('Chào mừng đến Đà Nẵng')).toBe('vi')
+  })
+})
+
+describe('source-language inference and fragment merge', () => {
+  it('infers the source language from the output transcription, not the input', () => {
+    const source = inferSourceLanguage(
+      [
+        { utteranceId: 'u1', targetLang: 'vi', originalText: 'Hello', translatedText: 'Xin chào', final: false, receivedAt: now },
+        { utteranceId: 'u1', targetLang: 'en', originalText: 'Hello', translatedText: 'Hello', final: false, receivedAt: now },
+      ],
+      enVi.pair,
+    )
+    expect(source).toBe('en')
+  })
+
+  it('accumulates delta fragments from one session into one segment', () => {
+    const m = merger()
+    m.add({ utteranceId: 'u1', targetLang: 'vi', originalText: 'Good morning', translatedText: 'Chào buổi sáng', final: false, receivedAt: now })
+    const merged = m.add({
+      utteranceId: 'u1',
+      targetLang: 'vi',
+      originalText: ' everyone',
+      translatedText: ' mọi người',
+      final: true,
+      receivedAt: now + 200,
+    })
+    expect(merged).not.toBeNull()
+    expect(merged!.original).toBe('Good morning everyone')
+    expect(merged!.translated).toBe('Chào buổi sáng mọi người')
+    expect(merged!.final).toBe(true)
+  })
+
+  it('drops a phantom fragment that carries no intelligible original', () => {
+    const merged = merger({ minCharacters: 3 }).add({
+      utteranceId: 'u1',
+      targetLang: 'vi',
+      originalText: 'a',
+      final: false,
+      receivedAt: now,
+    })
+    expect(merged).toBeNull()
+  })
+
+  it('labels a segment by its text when it contradicts the behavioral inference', () => {
+    // The vi-target session heard Vietnamese but answered in English — a flip.
+    // Echo-vs-translation inference concludes English; the transcript decides.
+    const merged = merger().add({
+      utteranceId: 'u15',
+      targetLang: 'vi',
+      originalText: 'vào đấy đấy.',
+      translatedText: "That's it.",
+      final: false,
+      receivedAt: now,
+    })
+    expect(merged).not.toBeNull()
+    expect(merged!.sourceLang).toBe('vi')
+    expect(merged!.translated).toBe("That's it.")
+  })
+
+  it('never publishes a pair that reads as one language on both lines', () => {
+    const merged = merger().add({
+      utteranceId: 'u1',
+      targetLang: 'vi',
+      originalText: 'The market is growing quickly',
+      translatedText: 'Revenue was very strong this year',
+      final: false,
+      receivedAt: now,
+    })
+    expect(merged).toBeNull()
+  })
+
+  it('selects the correct session\'s pair when inference alone would pick the wrong one', () => {
+    const m = merger()
+    m.add({
+      utteranceId: 'u1',
+      targetLang: 'vi',
+      originalText: 'Chúng ta ở Đà Nẵng',
+      translatedText: 'We are in Da Nang city now',
+      final: false,
+      receivedAt: now,
+    })
+    const merged = m.add({
+      utteranceId: 'u1',
+      targetLang: 'en',
+      originalText: 'Chúng ta ở Đà Nẵng',
+      translatedText: 'We are in Đà Nẵng',
+      final: false,
+      receivedAt: now + 10,
+    })
+    // Inference alone reads the en session as the passthrough and would label
+    // the speaker 'en'; deciding source from the transcript first outranks it.
+    expect(
+      inferSourceLanguage(
+        [
+          { utteranceId: 'u1', targetLang: 'vi', originalText: 'Chúng ta ở Đà Nẵng', translatedText: 'We are in Da Nang city now', final: false, receivedAt: now },
+          { utteranceId: 'u1', targetLang: 'en', originalText: 'Chúng ta ở Đà Nẵng', translatedText: 'We are in Đà Nẵng', final: false, receivedAt: now + 10 },
+        ],
+        enVi.pair,
+      ),
+    ).toBe('en')
+    expect(merged!.sourceLang).toBe('vi')
+    expect(merged!.translated).toBe('We are in Đà Nẵng')
+  })
+
+  it('a forced label outranks detection, but the same-language veto survives it', () => {
+    const forced = merger({ forcedSourceLang: 'vi' })
+    const merged = forced.add({
+      utteranceId: 'u1',
+      targetLang: 'en',
+      originalText: 'Xin chào các bạn',
+      translatedText: 'Hello friends',
+      final: false,
+      receivedAt: now,
+    })
+    expect(merged!.sourceLang).toBe('vi')
+    expect(merged!.translated).toBe('Hello friends')
+
+    const echo = merger({ forcedSourceLang: 'vi' }).add({
+      utteranceId: 'u1',
+      targetLang: 'en',
+      originalText: 'Hello everyone',
+      translatedText: 'Hello everyone and welcome',
+      final: false,
+      receivedAt: now,
+    })
+    expect(echo).toBeNull()
+  })
+
+  it('counts only real sentence ends, guarding decimals', () => {
+    expect(countSentences('One. Two. Three.')).toBe(3)
+    expect(countSentences('About 1.5 to 2.5 and 3.5 seconds')).toBe(0)
+  })
+})
+
+describe('a third pair drives the merge without touching src/transcript', () => {
+  // en/ko: a detector that recognises Hangul, EN function words, else abstains.
+  const HANGUL = /[가-힣]/u
+  const EN_WORDS = new Set(['the', 'is', 'we', 'are', 'in', 'hello', 'and', 'a', 'to'])
+  const enKo: LanguagePack = {
+    pair: ['en', 'ko'],
+    names: { en: 'English', ko: 'Korean' },
+    detect: (text) => {
+      const tokens = text.toLowerCase().split(/\s+/).filter(Boolean)
+      if (tokens.some((t) => HANGUL.test(t))) return 'ko'
+      return tokens.some((t) => EN_WORDS.has(t.replace(/[^a-z]/g, ''))) ? 'en' : null
+    },
+  }
+
+  function koMerger() {
+    return new UtteranceMerger({ pair: enKo.pair, detect: enKo.detect })
+  }
+
+  it('merges, decides source and vetoes for en/ko exactly as for en/vi', () => {
+    // EN speaker: the ko session translates, the en session echoes.
+    const m = koMerger()
+    m.add({ utteranceId: 'u1', targetLang: 'ko', originalText: 'Hello', translatedText: '안녕하세요', final: false, receivedAt: now })
+    const merged = m.add({
+      utteranceId: 'u1',
+      targetLang: 'en',
+      originalText: 'Hello',
+      translatedText: 'Hello',
+      final: true,
+      receivedAt: now + 10,
+    })
+    expect(merged!.sourceLang).toBe('en')
+    expect(merged!.original).toBe('Hello')
+    expect(merged!.translated).toBe('안녕하세요')
+
+    // The same-language veto still fires: two English lines is garbage.
+    const vetoed = koMerger().add({
+      utteranceId: 'u2',
+      targetLang: 'ko',
+      originalText: 'the market is here',
+      translatedText: 'we are in the room',
+      final: false,
+      receivedAt: now,
+    })
+    expect(vetoed).toBeNull()
+  })
+
+  it('falls through to echo-vs-translation inference when the detector abstains', () => {
+    // The detector below always abstains; behavior must be exactly as if none
+    // were consulted, i.e. inference decides.
+    const abstaining: LanguagePack = { pair: ['en', 'ko'], names: enKo.names, detect: () => null }
+    const m = new UtteranceMerger({ pair: abstaining.pair, detect: abstaining.detect })
+    m.add({ utteranceId: 'u1', targetLang: 'ko', originalText: 'Hello', translatedText: '안녕', final: false, receivedAt: now })
+    const merged = m.add({
+      utteranceId: 'u1',
+      targetLang: 'en',
+      originalText: 'Hello',
+      translatedText: 'Hello',
+      final: true,
+      receivedAt: now + 10,
+    })
+    // en echoes (passthrough), ko translates → source is en.
+    expect(merged!.sourceLang).toBe('en')
+    expect(merged!.translated).toBe('안녕')
+  })
+})
+
+// Compile-time guard: the fragment shape carries no app identifier.
+const _shape: IncomingFragment = { utteranceId: 'u0', targetLang: 'en', final: false, receivedAt: 0 }
+void _shape

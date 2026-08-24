@@ -1,28 +1,48 @@
 {
-  "name": "live-translator",
+  "name": "@sqrdao/live-translate",
+  "version": "0.1.0",
+  "description": "Host-agnostic live speech translation engine: browser audio in, merged bilingual utterances out, over two Gemini Live sessions.",
   "private": true,
-  "version": "0.2.0",
+  "license": "MIT",
   "type": "module",
-  "scripts": {
-    "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:client\"",
-    "dev:client": "vite --port 5173",
-    "dev:server": "tsx watch server.ts",
-    "build": "tsc --noEmit && vite build",
-    "start": "tsx server.ts",
-    "icons": "node scripts/gen-icons.mjs"
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
   },
-  "dependencies": {
-    "@google/genai": "^2.10.0",
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2"
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "import": "./dist/server/index.js"
+    },
+    "./lang/en-vi": {
+      "types": "./dist/lang/en-vi.d.ts",
+      "import": "./dist/lang/en-vi.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
+    "example": "npm --prefix examples/memory-host run dev"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
+    "@eslint/js": "^9.39.1",
     "@types/node": "^22.10.0",
-    "concurrently": "^9.1.0",
-    "tsx": "^4.19.2",
+    "eslint": "^9.39.1",
     "typescript": "^5.7.0",
-    "vite": "^6.0.0",
-    "vite-plugin-pwa": "^0.21.0"
+    "typescript-eslint": "^8.46.0",
+    "vitest": "^3.2.0"
   }
 }

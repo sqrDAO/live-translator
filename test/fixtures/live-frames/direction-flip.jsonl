@@ -1,0 +1,5 @@
+# Production u15: the vi-target session heard Vietnamese but answered in
+# English (a direction flip). The transcript decides the source before the
+# pair is selected, so this publishes with sourceLang vi, not en.
+{"atMs": 0, "target": "vi", "frame": {"serverContent": {"inputTranscription": {"text": "vào đấy đấy."}, "modelTurn": {"parts": [{"text": "That's it."}]}, "turnComplete": true}}}
+{"atMs": 100, "target": "en", "frame": {"serverContent": {"inputTranscription": {"text": "vào đấy đấy."}, "modelTurn": {"parts": [{"text": "That's it."}]}, "turnComplete": true}}}

@@ -1,0 +1,23 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # No network, no credentials, no emulator: the suite must pass on a
+      # runner that has none of them.
+      - run: npm run verify
+      # `file:../..` dependency: install, not ci (no portable lockfile).
+      - run: npm --prefix examples/memory-host install --no-audit --no-fund
+      - run: npm --prefix examples/memory-host run typecheck

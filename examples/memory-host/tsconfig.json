@@ -4,20 +4,20 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["node"],
+    "types": ["vite/client", "node"],
     "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitOverride": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
-    "declaration": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "@sqrdao/live-translate": ["../../src/index.ts"],
+      "@sqrdao/live-translate/server": ["../../src/server/index.ts"],
+      "@sqrdao/live-translate/lang/en-vi": ["../../src/lang/en-vi.ts"]
+    }
   },
-  "include": ["src", "test", "vitest.config.ts", "eslint.config.js"]
+  "include": ["src", "server.ts", "vite.config.ts", "test"]
 }

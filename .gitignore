@@ -1,7 +1,10 @@
 node_modules/
 dist/
 .env
+.env.local
 .DS_Store
 .vercel
 ._*
 .claude/
+examples/*/dist/
+examples/*/node_modules/

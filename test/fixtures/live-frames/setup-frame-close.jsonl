@@ -1,0 +1,14 @@
+# The PROTOCOL CAVEAT case: a direction drops, and every reconnect is accepted
+# and then closed on the setup frame. The attempt budget must stay bounded —
+# recovery is a server MESSAGE, never an onopen.
+{"atMs": 0, "close": {"target": "vi", "code": 1006}}
+{"atMs": 1100, "reopen": {"target": "vi"}}
+{"atMs": 1150, "close": {"target": "vi", "code": 1006}}
+{"atMs": 3200, "reopen": {"target": "vi"}}
+{"atMs": 3250, "close": {"target": "vi", "code": 1006}}
+{"atMs": 7300, "reopen": {"target": "vi"}}
+{"atMs": 7350, "close": {"target": "vi", "code": 1006}}
+{"atMs": 15400, "reopen": {"target": "vi"}}
+{"atMs": 15450, "close": {"target": "vi", "code": 1006}}
+{"atMs": 31500, "reopen": {"target": "vi"}}
+{"atMs": 31550, "close": {"target": "vi", "code": 1006}}
