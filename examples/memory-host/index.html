@@ -55,7 +55,10 @@
         </div>
         <div class="meta">
           <span class="pair"><b class="vi">VI</b><i>⇄</i><b class="en">EN</b></span>
-          <div class="status" id="status" data-state="idle">
+          <!-- The status text changes as the feed moves through connecting,
+               live, degraded and unavailable. Announce it: the dot beside it
+               is colour, and colour is never the only signal. -->
+          <div class="status" id="status" data-state="idle" role="status" aria-live="polite">
             <span class="dot"></span><span id="status-text">sẵn sàng</span>
           </div>
         </div>

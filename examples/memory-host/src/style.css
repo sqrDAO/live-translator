@@ -26,6 +26,9 @@
      — they just sit under names that swap roles between modes. */
   --gold-ink: var(--color-accent);
 
+  /* Guideline track is pure black, which only holds on the dark canvas. */
+  --track: var(--color-black);
+
   /* Source-language markers. Gold and teal are the system's warm/cool pair;
      gold stays dominant, teal appears only as decoration (a stripe, a dot).
      Neither is ever the only signal — every marker sits beside a text label. */
@@ -38,10 +41,13 @@
   --live-glow: var(--color-semantic-success-text-dark);
   --rec-fill: var(--color-semantic-error);
   --rec-glow: var(--color-semantic-error-text-dark);
+  --warn-fill: var(--color-semantic-warning);
+  --warn-glow: var(--color-semantic-warning-text-dark);
 }
 
 [data-theme='light'] {
   --gold-ink: var(--color-accent-text);
+  --track: var(--color-surface-alt);
 }
 
 * {
@@ -66,7 +72,10 @@ body {
 }
 
 :focus-visible {
-  outline: var(--component-focus-outline);
+  /* Not --component-focus-outline: that alias is frozen at gold for both
+     modes, and gold is ~1.5:1 on the light canvas. --gold-ink keeps the
+     guideline's #FFC700 on dark and darkens it where it has to be seen. */
+  outline: 2px solid var(--gold-ink);
   outline-offset: var(--component-focus-outline-offset);
 }
 
@@ -94,7 +103,7 @@ body {
    feed is the only thing on the page that scrolls. */
 .feed {
   scrollbar-width: thin;
-  scrollbar-color: var(--color-border) var(--color-black);
+  scrollbar-color: var(--color-border) var(--track);
 }
 
 .feed::-webkit-scrollbar {
@@ -102,7 +111,7 @@ body {
 }
 
 .feed::-webkit-scrollbar-track {
-  background: var(--color-black);
+  background: var(--track);
 }
 
 .feed::-webkit-scrollbar-thumb {
@@ -267,8 +276,17 @@ body {
   box-shadow: 0 0 10px var(--live-glow);
 }
 
-.status[data-state='error'] .dot,
-.status[data-state='closed'] .dot {
+/* These are the states renderStatus() can actually set. It maps 'live' to
+   'open' and 'closed' to 'idle', so the feed's whole vocabulary is idle,
+   connecting, open, degraded and unavailable — the last two used to fall
+   through to the idle dot, leaving a broken session looking like a resting
+   one at the exact moment the operator is checking. */
+.status[data-state='degraded'] .dot {
+  background: var(--warn-fill);
+  box-shadow: 0 0 10px var(--warn-glow);
+}
+
+.status[data-state='unavailable'] .dot {
   background: var(--rec-fill);
   box-shadow: 0 0 10px var(--rec-glow);
 }
@@ -383,16 +401,6 @@ body {
   content: '▏';
   color: var(--gold-ink);
   animation: caret 0.8s steps(1) infinite;
-}
-
-/* An engine note, not speech: dropped to secondary so it cannot be misread as
-   a caption. */
-.utt.note .translated {
-  font-family: var(--font-body-font-family);
-  font-size: 0.78rem;
-  font-weight: 400;
-  font-style: italic;
-  color: var(--ink-faint);
 }
 
 /* ── bottom deck ────────────────────────────────────────────────────────── */
@@ -589,6 +597,7 @@ body {
   .utt::before,
   .empty,
   .status .dot,
+  .utt:not(.final) .translated::after,
   .mic.on {
     animation: none;
   }
