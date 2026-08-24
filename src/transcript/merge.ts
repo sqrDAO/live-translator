@@ -56,9 +56,25 @@ type Accumulated = Map<LangTag, { original: string; translated: string }>
  * Both sessions transcribe the same audio, so the input transcript is identical
  * in both. What differs is the *output*: the session translating into the
  * second language produces a translation only when the speaker was not already
- * speaking it. The reference implementation therefore uses the output
- * transcription as the discriminator, which is what this reproduces: the source
- * language is the target of whichever session did the *least* translating.
+ * speaking it. The source language is therefore the target of whichever
+ * session did the *least* translating.
+ *
+ * PROBED 2026-08-24 against `gemini-3.5-live-translate-preview`, both
+ * directions, and the measured shape is stronger than the one this function
+ * was written for: the same-language session does not echo, it says **nothing
+ * at all**. On English speech the en-target session emits `inputTranscription`
+ * and no output of any kind (91 frames, every `modelTurn` part silent audio);
+ * on Vietnamese speech the vi-target session does the same. Only the
+ * translating session ever produces output text.
+ *
+ * So silence is the discriminator, and ranking sessions by raw token overlap —
+ * as this did — reads it exactly backwards: an empty translation scores 0,
+ * the bottom of the scale, which labelled the session that stayed quiet as the
+ * one that translated hardest. English speech was then attributed to the vi
+ * session (whose translation shares proper nouns with its input, so it scored
+ * *above* zero), `build()` went looking for the translation among the silent
+ * session's fragments, found none, and published nothing at all
+ * (fix-english-source-detection).
  */
 export function inferSourceLanguage(
   fragments: IncomingFragment[],
@@ -75,29 +91,62 @@ export function inferSourceLanguage(
   const b = byTarget.get(second)
   if (!a && !b) return null
 
-  // One session only. This is the normal case at the start of an utterance
-  // (the second session's first fragment has not landed yet) and the permanent
-  // case when one Live session is degraded. The same discriminator applies:
-  // if the one session's output echoes its own input it was not translating,
-  // so the speaker was already speaking its target language. Otherwise it was
-  // translating, and the source is the *other* language.
-  //
-  // Returning the target language unconditionally here — as an earlier version
-  // did — labels every translated segment with the language it was translated
-  // into, which then makes `build()` look for the translation among fragments
-  // from the other session and publish an empty translation.
+  // One session only: the normal case at the start of an utterance, before the
+  // peer's first fragment lands, and the permanent case when one Live session
+  // is degraded.
   if (!a || !b) {
     const only = a ?? b!
     const target: LangTag = a ? first : second
-    return isPassthrough(only.original, only.translated) ? target : otherOf(pair, target)
+    // Silence alone decides nothing here. It is the signature of the
+    // same-language session, but it is equally the signature of a translating
+    // session whose output has not arrived yet, and one session cannot tell
+    // those apart. Abstaining costs nothing: with no translation in hand
+    // `build()` has nothing to publish under either label.
+    switch (behaviourOf(only)) {
+      case 'silent':
+        return null
+      case 'echo':
+        return target
+      default:
+        return otherOf(pair, target)
+    }
   }
 
-  // The session whose output most closely matches its own input was not really
-  // translating: the speaker was already speaking that language.
-  const aIsPassthrough = similarity(a.original, a.translated)
-  const bIsPassthrough = similarity(b.original, b.translated)
-  if (aIsPassthrough === bIsPassthrough) return null
-  return aIsPassthrough > bIsPassthrough ? first : second
+  const behaviourA = behaviourOf(a)
+  const behaviourB = behaviourOf(b)
+
+  // The measured discriminator: exactly one session translated, so the other
+  // one's target is the language the speaker was already speaking — whether
+  // that session echoed the words back or, as the live protocol does, said
+  // nothing.
+  if (behaviourA === 'translating' && behaviourB !== 'translating') return second
+  if (behaviourB === 'translating' && behaviourA !== 'translating') return first
+
+  // Neither translated: two echoes, or two silences before either output
+  // landed. No evidence either way.
+  if (behaviourA !== 'translating' && behaviourB !== 'translating') return null
+
+  // Both read as translations, which the protocol says should not happen —
+  // one of them flipped direction. Fall back to the older, weaker ranking:
+  // whichever output stays closer to its own input translated less.
+  const overlapA = similarity(a.original, a.translated)
+  const overlapB = similarity(b.original, b.translated)
+  if (overlapA === overlapB) return null
+  return overlapA > overlapB ? first : second
+}
+
+/**
+ * What one session did with the audio.
+ *
+ * `silent` is a first-class answer, not a degenerate `translating`: under the
+ * measured protocol it is what the same-language session always does, and
+ * conflating the two is the bug above.
+ */
+type SessionBehaviour = 'silent' | 'echo' | 'translating'
+
+function behaviourOf(entry: { original: string; translated: string }): SessionBehaviour {
+  if (!entry.translated.trim()) return 'silent'
+  return isPassthrough(entry.original, entry.translated) ? 'echo' : 'translating'
 }
 
 /**
@@ -263,13 +312,24 @@ export class UtteranceMerger {
     // Behavioral inference stays as the fallback when both transcripts
     // abstain (no script evidence, no function words).
     //
-    // The second language's session is consulted first, then the first's —
-    // the order the production feed used; it only matters when the two
-    // transcripts disagree, and then it keeps the port's behavior identical.
+    // Both transcripts are consulted, and they must agree. The production
+    // feed asked the second language's session first and took the first
+    // non-null answer, which made consultation order the tiebreak whenever
+    // two transcripts of the same audio disagreed — a one-word English
+    // fragment the vi session mangled into something diacritic-heavy
+    // outvoted a clean English transcript sitting in the other session. A
+    // disagreement is not evidence; it falls through to behavioral
+    // inference, which the protocol answers cleanly.
+    const detectedBySecond = this.detect(byTarget.get(second)?.original ?? '')
+    const detectedByFirst = this.detect(byTarget.get(first)?.original ?? '')
+    const detectedBySpeech =
+      detectedBySecond && detectedByFirst && detectedBySecond !== detectedByFirst
+        ? null
+        : (detectedBySecond ?? detectedByFirst)
+
     const sourceLang =
       this.options.forcedSourceLang ??
-      this.detect(byTarget.get(second)?.original ?? '') ??
-      this.detect(byTarget.get(first)?.original ?? '') ??
+      detectedBySpeech ??
       inferSourceLanguage(fragments, this.pair, byTarget)
     if (!sourceLang) return null
 
