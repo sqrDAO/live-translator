@@ -11,6 +11,7 @@ import {
 import { enVi } from '@sqrdao/live-translate/lang/en-vi'
 
 import { MemorySink, type StoredUtterance } from './memory-sink'
+import { TranscriptHistory, TranscriptRecorder, transcriptText, type TranscriptSession } from './transcript-history'
 
 /**
  * The operator-declared speaker language, or `null` for Auto.
@@ -222,29 +223,100 @@ async function refreshDevices(): Promise<void> {
 void refreshDevices()
 
 // --- engine ------------------------------------------------------------------
-const sink = new MemorySink({
-  onUtterance: renderUtterance,
-  onRetract: removeUtterance,
-  onStatus: renderStatus,
+const history = new TranscriptHistory(() => window.localStorage)
+let recorder: TranscriptRecorder | null = null
+const dialog = $<HTMLDialogElement>('#history-dialog')
+const sessionSel = $<HTMLSelectElement>('#history-session')
+const downloadBtn = $<HTMLButtonElement>('#history-download')
+const deleteBtn = $<HTMLButtonElement>('#history-delete')
+let historySessions: TranscriptSession[] = []
+
+function historyError(): void {
+  $('#hint-text').textContent = 'Transcript could not be saved. Download it from History before leaving.'
+  $('#history-error').hidden = false
+  $('#history-error').textContent = 'Browser storage is unavailable or full. The current transcript can still be downloaded.'
+}
+
+function selectedSession(): TranscriptSession | undefined {
+  return historySessions.find((session) => session.id === sessionSel.value)
+}
+
+function renderHistory(): void {
+  const selected = selectedSession()
+  $('#history-transcript').textContent = selected ? transcriptText(selected) : 'No recorded sessions yet.'
+  downloadBtn.disabled = !selected
+  deleteBtn.disabled = !selected || ((running || stoppingRun) && selected.id === recorder?.session.id)
+}
+
+function refreshHistory(): void {
+  const previous = sessionSel.value
+  try {
+    historySessions = history.list()
+  } catch {
+    historyError()
+    historySessions = []
+  }
+  if (recorder) {
+    historySessions = historySessions.filter((session) => session.id !== recorder!.session.id)
+    historySessions.unshift(recorder.session)
+  }
+  sessionSel.replaceChildren(...historySessions.map((session) => new Option(
+    `${new Date(session.startedAt).toLocaleString()} · ${session.speakerLang ?? 'Auto'} · ${session.utterances.length} utterances`,
+    session.id,
+  )))
+  if (historySessions.some((session) => session.id === previous)) sessionSel.value = previous
+  renderHistory()
+}
+
+$('#history-open').addEventListener('click', () => { refreshHistory(); dialog.showModal() })
+$('#history-close').addEventListener('click', () => dialog.close())
+sessionSel.addEventListener('change', renderHistory)
+downloadBtn.addEventListener('click', () => {
+  const session = selectedSession()
+  if (!session) return
+  const url = URL.createObjectURL(new Blob([transcriptText(session)], { type: 'text/plain;charset=utf-8' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `transcript-${new Date(session.startedAt).toISOString().replace(/[:.]/g, '-')}.txt`
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 })
+deleteBtn.addEventListener('click', () => {
+  const session = selectedSession()
+  if (!session || ((running || stoppingRun) && session.id === recorder?.session.id)) return
+  if (!window.confirm('Delete this saved transcript? This cannot be undone.')) return
+  try {
+    history.delete(session.id)
+    if (recorder?.session.id === session.id) recorder = null
+    refreshHistory()
+  } catch { historyError() }
+})
+window.addEventListener('storage', () => { if (dialog.open) refreshHistory() })
 
 let engine: LiveTranslateEngine | null = null
 let running = false
+let stoppingRun = false
 
 async function stop(): Promise<void> {
+  if (stoppingRun) return
+  stoppingRun = true
+  micBtn.disabled = true
   running = false
   micBtn.classList.remove('on')
-  // Captured, because the await below spans an AudioContext close and an
-  // outbox flush, and `running` is already false: a tap inside that window
-  // starts a new engine, and nulling the field unconditionally afterwards
-  // dropped that engine's only reference — it kept the microphone and both
-  // sockets open with nothing left able to stop it.
+  // Keep the run paired with its recorder until teardown has drained the outbox.
   const stopping = engine
+  const stoppingRecorder = recorder
   await stopping?.stop()
+  stoppingRecorder?.finish()
+  stoppingRun = false
+  micBtn.disabled = false
+  micBtn.setAttribute('aria-label', 'Start translating')
+  if (dialog.open) refreshHistory()
   if (engine === stopping) engine = null
 }
 
 function start(): void {
+  if (running || stoppingRun) return
   // Each run builds a fresh engine, so utterance ids restart at `u0` and
   // `renderUtterance` would find the previous run's elements by id and
   // overwrite them where they sit — new captions scattered among stale ones at
@@ -257,6 +329,21 @@ function start(): void {
   // Two sessions either way. In Auto the engine decides the source per
   // utterance; with a declared direction it is told, and so is the model.
   wire = freshWire()
+  const runRecorder = new TranscriptRecorder(history, speakerLang, historyError)
+  recorder = runRecorder
+  const sink = new MemorySink({
+    onUtterance: (u) => {
+      runRecorder.record(u)
+      renderUtterance(u)
+      if (dialog.open) refreshHistory()
+    },
+    onRetract: (id) => {
+      runRecorder.retract(id)
+      removeUtterance(id)
+      if (dialog.open) refreshHistory()
+    },
+    onStatus: renderStatus,
+  })
   engine = new LiveTranslateEngine({
     languages: enVi,
     sink,
@@ -274,7 +361,9 @@ function start(): void {
   // Unlock the AudioContext synchronously inside the tap, before any await —
   // iOS Safari loses the gesture otherwise.
   engine.unlockAudioSync()
+  const startingEngine = engine
   running = true
+  micBtn.setAttribute('aria-label', 'Stop translating')
   micBtn.classList.add('on')
   void engine
     .start({
@@ -287,6 +376,7 @@ function start(): void {
     })
     .then(refreshDevices)
     .catch((error) => {
+      if (engine !== startingEngine) return
       console.error(error)
       renderStatus('unavailable')
       void stop()
@@ -319,8 +409,7 @@ directionEl.addEventListener('click', (event) => {
   // rebuild — the feed clears and both sessions re-mint.
   if (running) {
     void stop().then(() => {
-      // A tap on the mic during the teardown owns the decision; only restart
-      // if nothing else did.
+      // Restart with the latest direction after teardown finishes.
       if (!running) start()
     })
   }
