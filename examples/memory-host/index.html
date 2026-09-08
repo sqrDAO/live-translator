@@ -54,6 +54,7 @@
           <h1 class="wordmark">Phiên&nbsp;dịch <em>live</em></h1>
         </div>
         <div class="meta">
+          <button type="button" class="history-button" id="history-open">History</button>
           <span class="pair"><b class="vi">VI</b><i>⇄</i><b class="en">EN</b></span>
           <!-- The status text changes as the feed moves through connecting,
                live, degraded and unavailable. Announce it: the dot beside it
@@ -73,7 +74,7 @@
 
       <footer class="deck">
         <p class="hint">
-          <span id="hint-text">In-memory sink · no cloud service · translations appear as live text</span>
+          <span id="hint-text">Transcripts saved in this browser · no audio recording</span>
         </p>
         <!-- Which mic, and is audio actually flowing. Without this a silent or
              wrong input device is indistinguishable from a broken session:
@@ -100,6 +101,21 @@
         </div>
       </footer>
     </div>
+    <dialog id="history-dialog" role="dialog" aria-labelledby="history-title">
+      <div class="history-heading">
+        <h2 id="history-title">Translation history</h2>
+        <button type="button" class="history-button" id="history-close">Close</button>
+      </div>
+      <p>Saved on this device and browser. Clearing browser data removes history.</p>
+      <p id="history-error" role="alert" hidden></p>
+      <label for="history-session">Session</label>
+      <select id="history-session"></select>
+      <div class="history-actions">
+        <button type="button" class="history-button" id="history-download">Download transcript</button>
+        <button type="button" class="history-button" id="history-delete">Delete session</button>
+      </div>
+      <pre id="history-transcript"></pre>
+    </dialog>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

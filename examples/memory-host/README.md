@@ -1,7 +1,8 @@
 # memory-host — reference host for `@sqrdao/live-translate`
 
 The smallest real host: an **in-memory `CaptionSink`** and a page that captures,
-translates and renders. No database, no auth, no cloud service of any kind — the
+translates, renders, and saves text transcripts in browser storage. No database,
+auth, or cloud storage — the
 proof that the engine's boundary is real, and the thing a new project starts
 from.
 
@@ -31,6 +32,32 @@ pinned into the tokens, so switching re-mints and restarts the feed.
 With no key configured the token endpoint returns a **localhost-only stub**
 (gated on a development flag *and* a loopback host) so the UI runs without Gemini
 credentials — the socket will not actually translate, but nothing leaks a key.
+
+## Transcript history
+
+Each microphone run automatically records the original text and translation,
+with timestamps and the selected direction. Open **History** to choose a session,
+read it chronologically, download a UTF-8 text file, or delete it. Switching
+direction starts a separate recording. The current active session cannot be
+deleted from this tab. Deleting a recording from another tab stops further saves
+for that recording, without stopping live translation. Small deletion markers
+prevent delayed writes from bringing deleted transcripts back.
+
+Records use localStorage in this browser and origin, so they survive reloads but
+are not synced across devices. Clearing browser data removes them. No audio is
+recorded. Partial captions are updated in place and saved at most once per second;
+completed utterances, retractions, stopping, and page-hide events flush immediately.
+A browser crash may lose partial updates since the last save (normally at most
+one second). An interrupted session retains its latest saved text, with unfinished
+utterances labelled “partial”. A session without an end time may have been
+interrupted or still be running in another tab.
+
+If storage is blocked or full, the app displays an error and keeps translating.
+Unsaved transcripts stay available in History across new runs and direction
+changes. The app retries them when starting a run, opening History, or freeing
+space by deleting another session. The error clears when saving recovers. Download
+unsaved transcripts before leaving the page. Empty failed starts are not saved,
+and no saved sessions are automatically evicted.
 
 ## What to read
 

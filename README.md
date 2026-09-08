@@ -142,7 +142,7 @@ the declaration must travel with **every** mint, reconnects included, and
 changing it needs a fresh engine.
 
 A full, runnable host — an in-memory sink and a page that captures, translates
-and renders, with **no cloud service of any kind** — is in
+and renders, with browser-local transcript history and **no cloud storage** — is in
 [`examples/memory-host`](./examples/memory-host). Its own test suite runs with
 no key; point a real `GEMINI_API_KEY` at its `server.ts` to see it translate.
 
