@@ -11,7 +11,7 @@ import {
 import { enVi } from '@sqrdao/live-translate/lang/en-vi'
 
 import { MemorySink, type StoredUtterance } from './memory-sink'
-import { TranscriptHistory, TranscriptRecorder, transcriptText, type TranscriptSession } from './transcript-history'
+import { TranscriptHistory, TranscriptArchive, TRANSCRIPT_PREFIX, TRANSCRIPT_DELETE_PREFIX, transcriptText, type TranscriptRecorder, type TranscriptSession } from './transcript-history'
 
 /**
  * The operator-declared speaker language, or `null` for Auto.
@@ -223,18 +223,29 @@ async function refreshDevices(): Promise<void> {
 void refreshDevices()
 
 // --- engine ------------------------------------------------------------------
-const history = new TranscriptHistory(() => window.localStorage)
+const transcripts = new TranscriptHistory(() => window.localStorage)
+const archive = new TranscriptArchive(transcripts, renderStorageStatus)
 let recorder: TranscriptRecorder | null = null
 const dialog = $<HTMLDialogElement>('#history-dialog')
 const sessionSel = $<HTMLSelectElement>('#history-session')
 const downloadBtn = $<HTMLButtonElement>('#history-download')
 const deleteBtn = $<HTMLButtonElement>('#history-delete')
+let storedSessions: TranscriptSession[] = []
 let historySessions: TranscriptSession[] = []
+let storageOperationFailed = false
+let showingStorageError = false
 
-function historyError(): void {
-  $('#hint-text').textContent = 'Transcript could not be saved. Download it from History before leaving.'
-  $('#history-error').hidden = false
-  $('#history-error').textContent = 'Browser storage is unavailable or full. The current transcript can still be downloaded.'
+function renderStorageStatus(): void {
+  const failed = archive.failed || storageOperationFailed
+  if (failed === showingStorageError) return
+  showingStorageError = failed
+  $('#hint-text').textContent = failed
+    ? 'History storage is unavailable. Download unsaved transcripts before leaving.'
+    : 'Transcripts saved in this browser · no audio recording'
+  $('#history-error').hidden = !failed
+  $('#history-error').textContent = failed
+    ? 'Browser storage is unavailable or full. Unsaved sessions remain available to download until you leave this page.'
+    : ''
 }
 
 function selectedSession(): TranscriptSession | undefined {
@@ -243,33 +254,62 @@ function selectedSession(): TranscriptSession | undefined {
 
 function renderHistory(): void {
   const selected = selectedSession()
-  $('#history-transcript').textContent = selected ? transcriptText(selected) : 'No recorded sessions yet.'
+  const text = selected ? transcriptText(selected) : 'No recorded sessions yet.'
+  // Leave the DOM and scroll position alone when viewing an unchanged past session.
+  if ($('#history-transcript').textContent !== text) $('#history-transcript').textContent = text
   downloadBtn.disabled = !selected
   deleteBtn.disabled = !selected || ((running || stoppingRun) && selected.id === recorder?.session.id)
+}
+
+function sessionLabel(session: TranscriptSession): string {
+  const count = session.utterances.length
+  return `${new Date(session.startedAt).toLocaleString()} · ${session.speakerLang ?? 'Auto'} · ${count} ${count === 1 ? 'utterance' : 'utterances'}`
 }
 
 function refreshHistory(): void {
   const previous = sessionSel.value
   try {
-    historySessions = history.list()
+    storedSessions = transcripts.list()
+    storageOperationFailed = false
   } catch {
-    historyError()
-    historySessions = []
+    storageOperationFailed = true
   }
-  if (recorder) {
-    historySessions = historySessions.filter((session) => session.id !== recorder!.session.id)
-    historySessions.unshift(recorder.session)
-  }
-  sessionSel.replaceChildren(...historySessions.map((session) => new Option(
-    `${new Date(session.startedAt).toLocaleString()} · ${session.speakerLang ?? 'Auto'} · ${session.utterances.length} utterances`,
-    session.id,
-  )))
+  renderStorageStatus()
+  historySessions = archive.merge(storedSessions)
+  sessionSel.replaceChildren(...historySessions.map((session) => new Option(sessionLabel(session), session.id)))
   if (historySessions.some((session) => session.id === previous)) sessionSel.value = previous
   renderHistory()
 }
 
-$('#history-open').addEventListener('click', () => { refreshHistory(); dialog.showModal() })
-$('#history-close').addEventListener('click', () => dialog.close())
+/** Live captions update their own option only, with no storage scan. */
+function updateLiveHistory(run: TranscriptRecorder): void {
+  if (!dialog.open || run.deleted) return
+  historySessions = archive.merge(storedSessions)
+  let option = Array.from(sessionSel.options).find((item) => item.value === run.session.id)
+  if (!option && run.session.utterances.length) {
+    option = new Option('', run.session.id)
+    sessionSel.add(option, 0)
+  }
+  const label = sessionLabel(run.session)
+  if (option && option.textContent !== label) option.textContent = label
+  if (sessionSel.value === run.session.id) renderHistory()
+}
+
+$('#history-open').addEventListener('click', () => {
+  archive.flush()
+  refreshHistory()
+  if (typeof dialog.showModal === 'function') dialog.showModal()
+  else { dialog.setAttribute('open', ''); $('#history-close').focus() }
+})
+function closeHistory(): void {
+  if (typeof dialog.close === 'function') dialog.close()
+  else dialog.removeAttribute('open')
+  $('#history-open').focus()
+}
+$('#history-close').addEventListener('click', closeHistory)
+dialog.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && typeof dialog.close !== 'function') closeHistory()
+})
 sessionSel.addEventListener('change', renderHistory)
 downloadBtn.addEventListener('click', () => {
   const session = selectedSession()
@@ -279,40 +319,70 @@ downloadBtn.addEventListener('click', () => {
   link.href = url
   link.download = `transcript-${new Date(session.startedAt).toISOString().replace(/[:.]/g, '-')}.txt`
   link.click()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
 })
 deleteBtn.addEventListener('click', () => {
   const session = selectedSession()
   if (!session || ((running || stoppingRun) && session.id === recorder?.session.id)) return
   if (!window.confirm('Delete this saved transcript? This cannot be undone.')) return
   try {
-    history.delete(session.id)
-    if (recorder?.session.id === session.id) recorder = null
+    transcripts.delete(session.id)
+    archive.discard(session.id)
+    archive.flush()
     refreshHistory()
-  } catch { historyError() }
+  } catch {
+    storageOperationFailed = true
+    renderStorageStatus()
+  }
 })
-window.addEventListener('storage', () => { if (dialog.open) refreshHistory() })
+let storageRefreshTimer: ReturnType<typeof setTimeout> | undefined
+window.addEventListener('storage', (event) => {
+  if (event.key !== null && !event.key.startsWith(TRANSCRIPT_PREFIX) && !event.key.startsWith(TRANSCRIPT_DELETE_PREFIX)) return
+  if (event.key?.startsWith(TRANSCRIPT_DELETE_PREFIX) && event.newValue !== null) {
+    archive.discard(event.key.slice(TRANSCRIPT_DELETE_PREFIX.length))
+  }
+  if (!dialog.open || storageRefreshTimer !== undefined) return
+  storageRefreshTimer = setTimeout(() => {
+    storageRefreshTimer = undefined
+    refreshHistory()
+  }, 1000)
+})
+window.addEventListener('pagehide', () => archive.flush())
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') archive.flush()
+})
 
 let engine: LiveTranslateEngine | null = null
 let running = false
 let stoppingRun = false
+let stopPromise: Promise<void> | null = null
 
-async function stop(): Promise<void> {
-  if (stoppingRun) return
+function stop(): Promise<void> {
+  if (stopPromise) return stopPromise
   stoppingRun = true
   micBtn.disabled = true
   running = false
   micBtn.classList.remove('on')
-  // Keep the run paired with its recorder until teardown has drained the outbox.
   const stopping = engine
   const stoppingRecorder = recorder
-  await stopping?.stop()
-  stoppingRecorder?.finish()
-  stoppingRun = false
-  micBtn.disabled = false
-  micBtn.setAttribute('aria-label', 'Start translating')
-  if (dialog.open) refreshHistory()
-  if (engine === stopping) engine = null
+  stopPromise = (async () => {
+    try {
+      await stopping?.stop()
+    } catch (error) {
+      console.error(error)
+      renderStatus('unavailable')
+    } finally {
+      if (stoppingRecorder) archive.finish(stoppingRecorder)
+      if (engine === stopping) engine = null
+      if (recorder === stoppingRecorder) recorder = null
+      stoppingRun = false
+      stopPromise = null
+      micBtn.disabled = false
+      micBtn.setAttribute('aria-label', 'Start translating')
+    }
+    if (dialog.open) refreshHistory()
+  })()
+  return stopPromise
 }
 
 function start(): void {
@@ -329,18 +399,18 @@ function start(): void {
   // Two sessions either way. In Auto the engine decides the source per
   // utterance; with a declared direction it is told, and so is the model.
   wire = freshWire()
-  const runRecorder = new TranscriptRecorder(history, speakerLang, historyError)
+  const runRecorder = archive.begin(speakerLang)
   recorder = runRecorder
   const sink = new MemorySink({
     onUtterance: (u) => {
       runRecorder.record(u)
       renderUtterance(u)
-      if (dialog.open) refreshHistory()
+      updateLiveHistory(runRecorder)
     },
     onRetract: (id) => {
       runRecorder.retract(id)
       removeUtterance(id)
-      if (dialog.open) refreshHistory()
+      updateLiveHistory(runRecorder)
     },
     onStatus: renderStatus,
   })
@@ -360,7 +430,14 @@ function start(): void {
   })
   // Unlock the AudioContext synchronously inside the tap, before any await —
   // iOS Safari loses the gesture otherwise.
-  engine.unlockAudioSync()
+  try {
+    engine.unlockAudioSync()
+  } catch (error) {
+    console.error(error)
+    renderStatus('unavailable')
+    void stop()
+    return
+  }
   const startingEngine = engine
   running = true
   micBtn.setAttribute('aria-label', 'Stop translating')

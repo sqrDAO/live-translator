@@ -38,18 +38,26 @@ credentials — the socket will not actually translate, but nothing leaks a key.
 Each microphone run automatically records the original text and translation,
 with timestamps and the selected direction. Open **History** to choose a session,
 read it chronologically, download a UTF-8 text file, or delete it. Switching
-direction starts a separate recording. Active sessions cannot be deleted.
+direction starts a separate recording. The current active session cannot be
+deleted from this tab. Deleting a recording from another tab stops further saves
+for that recording, without stopping live translation. Small deletion markers
+prevent delayed writes from bringing deleted transcripts back.
 
 Records use localStorage in this browser and origin, so they survive reloads but
 are not synced across devices. Clearing browser data removes them. No audio is
-recorded. Partial captions are updated in place, and retracted captions are
-removed; an interrupted session retains its latest saved text, with unfinished
+recorded. Partial captions are updated in place and saved at most once per second;
+completed utterances, retractions, stopping, and page-hide events flush immediately.
+A browser crash may lose partial updates since the last save (normally at most
+one second). An interrupted session retains its latest saved text, with unfinished
 utterances labelled “partial”. A session without an end time may have been
 interrupted or still be running in another tab.
 
 If storage is blocked or full, the app displays an error and keeps translating.
-Download the current transcript before starting another session or leaving the
-page in that case. No saved sessions are automatically evicted.
+Unsaved transcripts stay available in History across new runs and direction
+changes. The app retries them when starting a run, opening History, or freeing
+space by deleting another session. The error clears when saving recovers. Download
+unsaved transcripts before leaving the page. Empty failed starts are not saved,
+and no saved sessions are automatically evicted.
 
 ## What to read
 

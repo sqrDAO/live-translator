@@ -646,3 +646,17 @@ body {
 #history-dialog label { display: block; }
 #history-session { width: 100%; margin: 8px 0 16px; }
 #history-transcript { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+
+/* Also usable as a non-modal panel on browsers without native dialog support. */
+#history-dialog:not([open]) { display: none; }
+#history-dialog[open] {
+  position: fixed;
+  inset: 0;
+  height: fit-content;
+  z-index: 1200;
+}
+#history-dialog #history-error {
+  color: var(--color-text-primary);
+  border-left: 3px solid var(--warn-fill);
+  padding-left: 12px;
+}
