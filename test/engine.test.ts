@@ -386,3 +386,117 @@ describe('isolation', () => {
     expect(b.sink.finals()[0]!.utterance.original).toBe('Room B')
   })
 })
+
+
+describe('progressive captions and separate latency', () => {
+  it('shows recognition immediately and joins a translation delayed beyond idle retirement', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(10_000)
+    const { engine, sink } = makeHarness({ allowSourceOnly: true, forcedSourceLang: 'en', partialSegmentIntervalMs: 100 })
+    const [target] = await start(engine)
+    engine.pushAudio('audio')
+    await vi.advanceTimersByTimeAsync(200)
+    target.receive(liveMessage('Hello everyone.', ''))
+    await flush()
+    expect(sink.partials().at(-1)?.utterance).toMatchObject({ utteranceId: 'u0', original: 'Hello everyone.', translated: '' })
+    expect(engine.latency.captureToFirstRecognition.vi).toMatchObject({ p50: 200, p95: 200, count: 1 })
+    expect(engine.latency.captureToFirstTranslation.vi).toBeNull()
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(sink.finals()).toHaveLength(0)
+    target.receive(liveMessage('', 'Xin chào mọi người.'))
+    await flush()
+    expect(sink.partials().at(-1)?.utterance).toMatchObject({ utteranceId: 'u0', translated: 'Xin chào mọi người.' })
+    expect(engine.latency.captureToFirstTranslation.vi).toMatchObject({ p50: 2200, count: 1 })
+    expect(engine.latency.captureToFirstRecognition.vi?.count).toBe(1)
+    await engine.stop()
+  })
+
+  it('keeps the bilingual-only default and clears pending measurements on restart', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(10_000)
+    const { engine, sink } = makeHarness({ forcedSourceLang: 'en' })
+    const [target] = await start(engine)
+    engine.pushAudio('audio')
+    target.receive(liveMessage('Hello everyone.', ''))
+    await flush()
+    expect(sink.published).toHaveLength(0)
+    await engine.stop()
+    const [restarted] = await start(engine)
+    restarted.receive(liveMessage('', 'Xin chào'))
+    await flush()
+    expect(engine.latency.captureToFirstRecognition.vi).toBeNull()
+    expect(engine.latency.captureToFirstTranslation.vi).toBeNull()
+    await engine.stop()
+  })
+})
+
+
+it('coalesces progressive updates at the configured cadence', async () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(10_000)
+  const { engine, sink } = makeHarness({ allowSourceOnly: true, forcedSourceLang: 'en', partialSegmentIntervalMs: 100 })
+  const [target] = await start(engine)
+  target.receive(liveMessage('Hello', ''))
+  await flush()
+  await vi.advanceTimersByTimeAsync(50)
+  target.receive(liveMessage(' everyone', ''))
+  await flush()
+  expect(sink.partials()).toHaveLength(1)
+  await vi.advanceTimersByTimeAsync(50)
+  expect(sink.partials()).toHaveLength(2)
+  expect(sink.partials()[1]?.utterance.original).toBe('Hello everyone')
+  await engine.stop()
+})
+
+
+it('measures direction switches from the matching run and notifies only for new samples', async () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(10_000)
+  const onLatency = vi.fn()
+  const { engine } = makeHarness({ onLatency })
+  const [viTarget, enTarget] = await start(engine)
+  engine.pushAudio('English speech')
+  await vi.advanceTimersByTimeAsync(3_000)
+  // Output-only frames isolate metric notifications from sink publications.
+  viTarget.receive(liveMessage('', 'Xin chào'))
+  await flush()
+  expect(engine.latency.captureToFirstTranslation.vi).toMatchObject({ p50: 3000, count: 1 })
+  expect(engine.latency.captureToFirstTranslation.en).toBeNull()
+  await vi.advanceTimersByTimeAsync(17_000)
+  engine.pushAudio('Vietnamese speech')
+  await vi.advanceTimersByTimeAsync(3_000)
+  enTarget.receive(liveMessage('', 'Hello'))
+  await flush()
+  expect(engine.latency.captureToFirstTranslation.en).toMatchObject({ p50: 3000, p95: 3000, worst: 3000, count: 1 })
+  const notifications = onLatency.mock.calls.length
+  enTarget.receive(liveMessage('', ' everyone'))
+  await flush()
+  expect(onLatency).toHaveBeenCalledTimes(notifications)
+  // Recognition is still a separate sample even after output has arrived.
+  enTarget.receive(liveMessage('1234', ''))
+  await flush()
+  expect(onLatency.mock.calls.length).toBeGreaterThan(notifications)
+  await engine.stop()
+})
+
+
+it('notifies callback-only observers when restarting clears latency metrics', async () => {
+  const onLatency = vi.fn()
+  const { engine } = makeHarness({ onLatency })
+  const [target] = await start(engine)
+  engine.noteChunkArrival(Date.now() - 100)
+  target.receive(liveMessage('', 'Xin chào'))
+  await flush()
+  expect(onLatency.mock.calls.at(-1)?.[0].captureToFirstTranslation.vi).not.toBeNull()
+  await engine.stop()
+  onLatency.mockClear()
+  await start(engine)
+  expect(onLatency).toHaveBeenCalledTimes(1)
+  expect(onLatency.mock.calls[0]?.[0]).toEqual({
+    captureToFirstText: { en: null, vi: null },
+    captureToFirstRecognition: { en: null, vi: null },
+    captureToFirstTranslation: { en: null, vi: null },
+    textToPublished: null,
+  })
+  await engine.stop()
+})

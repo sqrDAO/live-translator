@@ -45,6 +45,7 @@ export interface PublishableUtterance {
   utteranceId: string
   sourceLang: LangTag
   original: string
+  /** Empty when allowSourceOnly is enabled and translation has not arrived. */
   translated: string
   /** Epoch ms of the utterance's first fragment. */
   startedAt: number

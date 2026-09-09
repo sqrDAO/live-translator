@@ -41,9 +41,13 @@ export type TurnPublication =
    */
   | { kind: 'retract'; utteranceId: string }
 
+/** Extra time for output-only frames after the last recognized input. */
+export const SOURCE_TRANSLATION_GRACE_MS = 2_500
+
 interface TurnState {
   completedTargets: Set<LangTag>
   lastUpdatedAt: number
+  lastInputAt: number
   /** When this turn opened. `lastUpdatedAt` measures silence; this measures age. */
   startedAt: number
 }
@@ -52,6 +56,7 @@ export interface TargetTurnCoordinatorOptions {
   pair: LanguagePair
   detect: LanguageDetector
   forcedSourceLang?: LangTag
+  allowSourceOnly?: boolean
   /**
    * An utterance's ceiling, in sentences and in wall time
    * (caption-utterance-cap). Idle retirement is the only turn boundary the
@@ -85,11 +90,12 @@ export class TargetTurnCoordinator {
     assertLanguagePair(options.pair)
     this.pair = options.pair
     for (const target of this.pair) this.targetTurns.set(target, 0)
-    this.maxUtteranceMs = options.maxUtteranceMs ?? Number.POSITIVE_INFINITY
+    this.maxUtteranceMs = options.maxUtteranceMs ?? (options.allowSourceOnly ? 10_000 : Number.POSITIVE_INFINITY)
     this.maxUtteranceSentences = options.maxUtteranceSentences ?? Number.POSITIVE_INFINITY
     this.merger = new UtteranceMerger({
       pair: options.pair,
       detect: options.detect,
+      allowSourceOnly: options.allowSourceOnly ?? false,
       ...(options.forcedSourceLang ? { forcedSourceLang: options.forcedSourceLang } : {}),
     })
   }
@@ -115,14 +121,29 @@ export class TargetTurnCoordinator {
   accept(target: LangTag, message: TurnMessage, now: number): TurnPublication[] {
     if (!message.inputText && !message.outputText && !message.turnComplete) return []
 
+    const publications: TurnPublication[] = []
+    const previousIndex = this.cursor(target)
+    const previous = this.turns.get(previousIndex)
+    const preview = previous && this.merger.get(idFor(previousIndex))
+    // New recognized speech after an input pause ends a missing-translation
+    // preview. The grace is for delayed output, not for appending a new phrase
+    // to source text whose translation never arrived. Check on accept as well
+    // as the idle poll so timer scheduling cannot change the pairing.
+    if (message.inputText && previous && preview && !preview.translated
+      && now - previous.lastInputAt >= this.idleFinalizeMs) {
+      publications.push(...this.retire(previousIndex, 'final'))
+    }
+
     const turnIndex = this.cursor(target)
     const utteranceId = idFor(turnIndex)
     const state = this.turns.get(turnIndex) ?? {
       completedTargets: new Set<LangTag>(),
       lastUpdatedAt: now,
+      lastInputAt: now,
       startedAt: now,
     }
     state.lastUpdatedAt = now
+    if (message.inputText) state.lastInputAt = now
     this.turns.set(turnIndex, state)
 
     const fragment: IncomingFragment = {
@@ -142,7 +163,7 @@ export class TargetTurnCoordinator {
     }
 
     if (state.completedTargets.size === this.pair.length) {
-      return this.retire(turnIndex, 'final')
+      return [...publications, ...this.retire(turnIndex, 'final')]
     }
 
     // The sentence cap fires on the fragment that *completes* the Nth sentence,
@@ -152,11 +173,12 @@ export class TargetTurnCoordinator {
     // a per-target remainder and is the kind of surgery this pipeline has
     // already been burned by. Counted on the source transcript, not the
     // translation, so the boundary is the speaker's rather than the model's.
-    if (merged && countSentences(merged.original) >= this.maxUtteranceSentences) {
-      return this.retire(turnIndex, 'final')
+    if (merged?.translated && countSentences(merged.original) >= this.maxUtteranceSentences) {
+      return [...publications, ...this.retire(turnIndex, 'final')]
     }
 
-    return merged ? [{ kind: 'partial', utteranceId, merged }] : []
+    if (merged) publications.push({ kind: 'partial', utteranceId, merged })
+    return publications
   }
 
   /**
@@ -172,7 +194,14 @@ export class TargetTurnCoordinator {
     for (const [turnIndex, state] of [...this.turns]) {
       const quiet = now - state.lastUpdatedAt >= this.idleFinalizeMs
       const overlong = now - state.startedAt >= this.maxUtteranceMs
-      if (!quiet && !overlong) continue
+      // Allow a short output grace, measured from the last input, while the
+      // age cap still bounds continuous source-only speech.
+      const preview = this.merger.get(idFor(turnIndex))
+      const awaitingTranslation = preview && !preview.translated
+      const waiting = awaitingTranslation
+        ? now - state.lastInputAt < Math.max(this.idleFinalizeMs, SOURCE_TRANSLATION_GRACE_MS)
+        : !quiet
+      if (!overlong && waiting) continue
       publications.push(...this.retire(turnIndex, 'final'))
     }
     return publications

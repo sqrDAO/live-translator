@@ -242,6 +242,8 @@ export interface UtteranceMergerOptions {
   detect: LanguageDetector
   /** Fragments shorter than this are treated as phantom noise. */
   minCharacters?: number
+  /** Permit recognized source text before translation; empty translated means pending/missing. */
+  allowSourceOnly?: boolean
   /**
    * Operator-declared speaker language (caption-direction-control): the
    * label is taken as ground truth, bypassing behavioral inference and
@@ -357,10 +359,8 @@ export class UtteranceMerger {
       if (flipped && this.detect(flipped) !== sourceLang) translated = flipped
     }
 
-    // A combined segment must have both display languages. A source
-    // transcript without its translation would otherwise publish an empty
-    // bubble on every surface.
-    if (!original || !translated) return null
+    // Hosts opt in because existing sinks expect a complete bilingual pair.
+    if (!original || (!translated && !this.options.allowSourceOnly)) return null
 
     // Never publish a pair that reads as one language on both lines,
     // whatever the operator declared. Two forms of the same veto: the pair

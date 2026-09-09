@@ -17,6 +17,8 @@
 export interface LatencySnapshot {
   /** Median over the retained window, rounded to the millisecond. */
   p50: number
+  /** Nearest-rank 95th percentile over the retained window. */
+  p95: number
   /** Largest sample since the tracker was created. Not windowed. */
   worst: number
   /** Every sample ever recorded, not just the retained ones. */
@@ -42,8 +44,8 @@ export class LatencyTracker {
    * timestamp read earlier than the one it is subtracted from. Recording the
    * negative result would drag p50 toward a latency no room ever saw.
    */
-  record(ms: number): void {
-    if (!Number.isFinite(ms) || ms < 0) return
+  record(ms: number): boolean {
+    if (!Number.isFinite(ms) || ms < 0) return false
 
     this.total += 1
     // `worst` is all-time while p50 is windowed: the window keeps the median
@@ -53,6 +55,7 @@ export class LatencyTracker {
 
     this.samples.push(ms)
     if (this.samples.length > this.capacity) this.samples.shift()
+    return true
   }
 
   /** `null` until a sample exists, so a panel shows "—" rather than "0 ms". */
@@ -60,6 +63,7 @@ export class LatencyTracker {
     if (this.samples.length === 0) return null
     return {
       p50: median(this.samples),
+      p95: Math.round([...this.samples].sort((a, b) => a - b)[Math.ceil(this.samples.length * 0.95) - 1]!),
       worst: Math.round(this.worstMs),
       count: this.total,
     }

@@ -112,3 +112,40 @@ describe('utterance caps', () => {
     expect(b.finalizeIdle(at + 1)).toEqual([])
   })
 })
+
+
+it('bounds a source-only preview without cutting it at the source sentence cap', () => {
+  const c = new TargetTurnCoordinator(IDLE, {
+    pair: enVi.pair, detect: enVi.detect, forcedSourceLang: 'en',
+    allowSourceOnly: true, maxUtteranceMs: 10_000, maxUtteranceSentences: 1,
+  })
+  expect(c.accept('vi', { inputText: 'Hello everyone.' }, 1000)[0]?.kind).toBe('partial')
+  expect(c.finalizeIdle(3000)).toEqual([])
+  expect(c.finalizeIdle(11000)[0]).toMatchObject({ kind: 'final', utteranceId: 'u0', merged: { translated: '' } })
+})
+
+
+it('keeps a new phrase separate when the preceding preview never gets translated', () => {
+  const c = new TargetTurnCoordinator(IDLE, {
+    pair: enVi.pair, detect: enVi.detect, forcedSourceLang: 'en', allowSourceOnly: true,
+  })
+  c.accept('vi', { inputText: 'Hello everyone.' }, 1000)
+  expect(c.finalizeIdle(2600)).toEqual([])
+  const events = c.accept('vi', { inputText: 'Thank you.', outputText: 'Cảm ơn.' }, 3000)
+  expect(events).toMatchObject([
+    { kind: 'final', utteranceId: 'u0', merged: { original: 'Hello everyone.', translated: '' } },
+    { kind: 'partial', utteranceId: 'u1', merged: { original: 'Thank you.', translated: 'Cảm ơn.' } },
+  ])
+})
+
+it('expires translation grace from the latest input, before the age cap', () => {
+  const c = new TargetTurnCoordinator(IDLE, {
+    pair: enVi.pair, detect: enVi.detect, forcedSourceLang: 'en', allowSourceOnly: true,
+  })
+  c.accept('vi', { inputText: 'Hello' }, 1000)
+  c.accept('vi', { inputText: ' everyone.' }, 2000)
+  expect(c.finalizeIdle(4499)).toEqual([])
+  expect(c.finalizeIdle(4500)).toMatchObject([
+    { kind: 'final', utteranceId: 'u0', merged: { original: 'Hello everyone.', translated: '' } },
+  ])
+})

@@ -5,6 +5,7 @@ import {
   LiveTranslateEngine,
   type CaptureDiagnostics,
   type LangTag,
+  type LatencyReport,
   type MintToken,
   type TokenGrant,
 } from '@sqrdao/live-translate'
@@ -93,7 +94,7 @@ function renderUtterance(u: StoredUtterance): void {
   el.classList.toggle('final', u.final)
   el.querySelector('.tag')!.textContent = u.sourceLang === 'en' ? 'EN → TIẾNG VIỆT' : 'VI → ENGLISH'
   el.querySelector('.original')!.textContent = u.original
-  el.querySelector('.translated')!.textContent = u.translated
+  el.querySelector('.translated')!.textContent = u.translated || (u.final ? 'Chưa có bản dịch' : 'Đang dịch…')
   feed.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
@@ -110,6 +111,7 @@ function removeUtterance(utteranceId: string): void {
  * "đang dịch" and publish nothing — and cost hours apart without this line.
  */
 let lastCapture: CaptureDiagnostics | null = null
+let lastLatency: LatencyReport | null = null
 let lastPaintedAt = 0
 
 /**
@@ -179,6 +181,11 @@ function paint(force = false): void {
           ...(d.gatedWhileAudible > 0 ? [`⚠ ${d.gatedWhileAudible} gated while audible`] : []),
         ]
       : []),
+    ...(['en', 'vi'] as const).map((lang) => {
+      const recognition = lastLatency?.captureToFirstRecognition[lang]
+      const translation = lastLatency?.captureToFirstTranslation[lang]
+      return `${lang} onset→recognition ${recognition ? `${recognition.p50}/${recognition.p95}ms` : '—'}; onset→output ${translation ? `${translation.p50}/${translation.p95}ms` : '—'} (p50/p95)`
+    }),
     `${wire.sockets} sockets`,
     `${wire.frames} frames in`,
     ...(wire.closes > 0 ? [`⚠ ${wire.closes} closes (last ${wire.lastClose})`] : []),
@@ -399,6 +406,7 @@ function start(): void {
   // Two sessions either way. In Auto the engine decides the source per
   // utterance; with a declared direction it is told, and so is the model.
   wire = freshWire()
+  lastLatency = null
   const runRecorder = archive.begin(speakerLang)
   recorder = runRecorder
   const sink = new MemorySink({
@@ -416,6 +424,9 @@ function start(): void {
   })
   engine = new LiveTranslateEngine({
     languages: enVi,
+    allowSourceOnly: true,
+    partialSegmentIntervalMs: 100,
+    onLatency: (report) => { lastLatency = report; paint() },
     sink,
     mintToken,
     createSocket,

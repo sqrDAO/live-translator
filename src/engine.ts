@@ -122,7 +122,7 @@ const MAX_RETRACTED_UTTERANCES = 128
 /**
  * What the operator reads, and what a rehearsal reports.
  *
- * Two figures rather than one total, because they fail for different reasons
+ * Separate figures because they fail for different reasons
  * and only one of them is ours: `captureToFirstText` is network and model, per
  * target language so a slow socket in one direction is distinguishable from
  * the other; `textToPublished` is coordination, throttling and the sink's
@@ -136,6 +136,12 @@ const MAX_RETRACTED_UTTERANCES = 128
  */
 export interface LatencyReport {
   captureToFirstText: Record<LangTag, LatencySnapshot | null>
+  /** First input transcript per speech run, measured from chunk arrival. */
+  captureToFirstRecognition: Record<LangTag, LatencySnapshot | null>
+  /** First output text per speech run; includes speaking time, not just endpoint delay.
+   * Echoes can count as output; a silent same-language target produces no sample.
+   * Like captureToFirstText, an unmatched run retains its onset and may overstate. */
+  captureToFirstTranslation: Record<LangTag, LatencySnapshot | null>
   textToPublished: LatencySnapshot | null
 }
 
@@ -176,6 +182,10 @@ export interface EngineOptions<G extends TokenGrant = TokenGrant> {
    * pinned into the tokens and need a fresh mint anyway.
    */
   forcedSourceLang?: LangTag
+  /** Opt in to source captions with an empty translation until output arrives. */
+  allowSourceOnly?: boolean
+  /** Partial publication cadence; defaults to 250 ms. Finals bypass it. */
+  partialSegmentIntervalMs?: number
   onStatus?: (status: FeedStatus) => void
   onError: (error: Error) => void
   /** Every utterance the sink accepted, after it landed. A local observer, not a second sink. */
@@ -199,7 +209,7 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
   private readonly pair: LanguagePack['pair']
   private readonly coordinator: TargetTurnCoordinator
   private readonly sessions: LiveSessionManager<G>
-  private readonly throttle = new WriteThrottle({ minIntervalMs: PARTIAL_SEGMENT_INTERVAL_MS })
+  private readonly throttle: WriteThrottle
   private readonly outbox: PublicationOutbox<MergedUtterance>
   /** Utterances the sink accepted, and whether their final has landed. */
   private readonly published = new Map<string, { final: boolean }>()
@@ -208,6 +218,10 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
   /** One tracker per target for capture→text, one for text→published. */
   private readonly captureToFirstText = new Map<LangTag, LatencyTracker>()
   private readonly textToPublished = new LatencyTracker()
+  private readonly recognition = new Map<LangTag, LatencyTracker>()
+  private readonly translation = new Map<LangTag, LatencyTracker>()
+  private readonly awaitingRecognition = new Map<LangTag, number>()
+  private readonly awaitingTranslation = new Map<LangTag, number>()
   private lastChunkAt = 0
   /**
    * Targets that have not yet produced text, each holding *the onset it was
@@ -252,10 +266,18 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
   constructor(private readonly options: EngineOptions<G>) {
     assertLanguagePair(options.languages.pair)
     this.pair = options.languages.pair
+    const interval = options.partialSegmentIntervalMs ?? PARTIAL_SEGMENT_INTERVAL_MS
+    if (!Number.isFinite(interval) || interval < 0) throw new Error('partialSegmentIntervalMs must be finite and non-negative')
+    this.throttle = new WriteThrottle({ minIntervalMs: interval })
+    for (const target of this.pair) {
+      this.recognition.set(target, new LatencyTracker())
+      this.translation.set(target, new LatencyTracker())
+    }
     for (const target of this.pair) this.captureToFirstText.set(target, new LatencyTracker())
     this.coordinator = new TargetTurnCoordinator(IDLE_FINALIZE_MS, {
       pair: this.pair,
       detect: options.languages.detect,
+      allowSourceOnly: options.allowSourceOnly ?? false,
       ...(options.forcedSourceLang ? { forcedSourceLang: options.forcedSourceLang } : {}),
       maxUtteranceSentences: MAX_UTTERANCE_SENTENCES,
       maxUtteranceMs: MAX_UTTERANCE_MS,
@@ -318,6 +340,15 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
     // running the idle poll twice per tick forever.
     this.clearTimers()
     this.stopped = false
+    this.lastChunkAt = 0
+    this.awaitingFirstText.clear()
+    this.awaitingRecognition.clear()
+    this.awaitingTranslation.clear()
+    for (const trackers of [this.captureToFirstText, this.recognition, this.translation]) {
+      for (const tracker of trackers.values()) tracker.reset()
+    }
+    this.textToPublished.reset()
+    this.reportLatency()
     // A new session does not inherit the last one's store trouble.
     this.writeFailing = false
     this.setStatus('connecting')
@@ -494,19 +525,20 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
       // accepted direction, and the safe one for a number reported to a
       // client. Overwriting instead understates, silently.
       for (const target of this.pair) {
-        if (!this.awaitingFirstText.has(target)) this.awaitingFirstText.set(target, now)
+        for (const pending of [this.awaitingFirstText, this.awaitingRecognition, this.awaitingTranslation]) {
+          if (!pending.has(target)) pending.set(target, now)
+        }
       }
     }
     this.lastChunkAt = now
   }
 
   /** One sample per run per target; later fragments in the run are ignored. */
-  private noteFirstText(target: LangTag, now: number): void {
+  private noteFirstText(target: LangTag, now: number): boolean {
     const onset = this.awaitingFirstText.get(target)
-    if (onset === undefined) return
+    if (onset === undefined) return false
     this.awaitingFirstText.delete(target)
-    this.captureToFirstText.get(target)?.record(now - onset)
-    this.reportLatency()
+    return this.captureToFirstText.get(target)!.record(now - onset)
   }
 
   /** One shape for a diagnostics panel and the unit suite alike. */
@@ -515,7 +547,12 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
     for (const [target, tracker] of this.captureToFirstText) {
       captureToFirstText[target] = tracker.snapshot
     }
-    return { captureToFirstText, textToPublished: this.textToPublished.snapshot }
+    return {
+      captureToFirstText,
+      captureToFirstRecognition: Object.fromEntries([...this.recognition].map(([lang, tracker]) => [lang, tracker.snapshot])),
+      captureToFirstTranslation: Object.fromEntries([...this.translation].map(([lang, tracker]) => [lang, tracker.snapshot])),
+      textToPublished: this.textToPublished.snapshot,
+    }
   }
 
   private reportLatency(): void {
@@ -533,10 +570,30 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
     // Every text frame reaches a surface now that idle retirement advances the
     // cursors instead of quarantining (fix-caption-idle-turn-boundary), so
     // every text frame is fair to measure.
-    if (parsed.inputText || parsed.outputText) {
-      this.noteFirstText(target, receivedAt)
+    let latencyChanged = false
+    for (const [text, pending, trackers] of [
+      [parsed.inputText, this.awaitingRecognition, this.recognition],
+      [parsed.outputText, this.awaitingTranslation, this.translation],
+    ] as const) {
+      const onset = pending.get(target)
+      if (text && onset !== undefined) {
+        pending.delete(target)
+        latencyChanged = trackers.get(target)!.record(receivedAt - onset) || latencyChanged
+        if (pending === this.awaitingTranslation) {
+          // Only the translating target emits output under the pinned protocol.
+          // Its peer must not carry this run into the next direction switch.
+          // A peer already armed for a different run still owns that sample.
+          for (const peer of this.pair) {
+            if (pending.get(peer) === onset) pending.delete(peer)
+          }
+        }
+      }
     }
-    this.publishCoordinatorEvents(this.coordinator.accept(target, parsed, Date.now()))
+    if (parsed.inputText || parsed.outputText) {
+      latencyChanged = this.noteFirstText(target, receivedAt) || latencyChanged
+    }
+    if (latencyChanged) this.reportLatency()
+    this.publishCoordinatorEvents(this.coordinator.accept(target, parsed, receivedAt))
   }
 
   // -------------------------------------------------------------------------
