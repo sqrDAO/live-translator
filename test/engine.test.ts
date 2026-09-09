@@ -478,3 +478,25 @@ it('measures direction switches from the matching run and notifies only for new 
   expect(onLatency.mock.calls.length).toBeGreaterThan(notifications)
   await engine.stop()
 })
+
+
+it('notifies callback-only observers when restarting clears latency metrics', async () => {
+  const onLatency = vi.fn()
+  const { engine } = makeHarness({ onLatency })
+  const [target] = await start(engine)
+  engine.noteChunkArrival(Date.now() - 100)
+  target.receive(liveMessage('', 'Xin chào'))
+  await flush()
+  expect(onLatency.mock.calls.at(-1)?.[0].captureToFirstTranslation.vi).not.toBeNull()
+  await engine.stop()
+  onLatency.mockClear()
+  await start(engine)
+  expect(onLatency).toHaveBeenCalledTimes(1)
+  expect(onLatency.mock.calls[0]?.[0]).toEqual({
+    captureToFirstText: { en: null, vi: null },
+    captureToFirstRecognition: { en: null, vi: null },
+    captureToFirstTranslation: { en: null, vi: null },
+    textToPublished: null,
+  })
+  await engine.stop()
+})

@@ -348,6 +348,7 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
       for (const tracker of trackers.values()) tracker.reset()
     }
     this.textToPublished.reset()
+    this.reportLatency()
     // A new session does not inherit the last one's store trouble.
     this.writeFailing = false
     this.setStatus('connecting')
