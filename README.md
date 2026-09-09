@@ -209,11 +209,13 @@ speech before its translation. `translated: ''` means translation is pending
 same `utteranceId` when translation arrives. Existing hosts retain bilingual-only
 publication by default; the memory host enables progressive captions.
 
-A source-only preview waits for translation through the normal idle timeout,
-up to the existing 10-second utterance age cap. The source sentence cap waits
-for translation too. This accommodates delayed output, but without protocol
-alignment IDs, output arriving after retirement can still belong to a later
-utterance. The age cap is a bound, not a guarantee of translation completeness.
+A source-only preview gives delayed output 2.5 seconds after the last input
+fragment, bounded by the 10-second utterance age cap. New input after a
+1.5-second input pause starts a separate caption, so a skipped translation does
+not pair the next phrase's translation with both phrases. The source sentence
+cap waits for translation too. These are timing heuristics: without protocol
+alignment IDs, delayed input can be mistaken for a new phrase and output after
+retirement can still belong to a later utterance.
 
 `partialSegmentIntervalMs` controls partial sink writes (default 250 ms; the
 memory host uses 100 ms). Finals bypass the interval. Remote sinks should choose
@@ -226,7 +228,10 @@ Snapshots include windowed p50/p95, all-time worst, and count, reset at start.
 Both capture metrics start at the first delivered voiced chunk, so they include
 speaking time and exclude prior device/capture buffering. Translation measures
 first output text, which may be an echo; silent targets have no sample. Unmatched
-speech runs retain their onset and can overstate the next sample. These are
+speech runs retain their onset and can overstate the next sample. When a target
+produces output, its peer's translation arm for the same run is cleared because
+the pinned protocol emits output only on the translating target. This prevents
+ordinary direction switches from inheriting the prior speaker's onset. These are
 not speech-end-to-response or screen-paint measurements. Publication timing
 includes socket decode/queueing through sink completion, not a remote display.
 

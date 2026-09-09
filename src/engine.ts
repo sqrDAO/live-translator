@@ -533,11 +533,11 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
   }
 
   /** One sample per run per target; later fragments in the run are ignored. */
-  private noteFirstText(target: LangTag, now: number): void {
+  private noteFirstText(target: LangTag, now: number): boolean {
     const onset = this.awaitingFirstText.get(target)
-    if (onset === undefined) return
+    if (onset === undefined) return false
     this.awaitingFirstText.delete(target)
-    this.captureToFirstText.get(target)?.record(now - onset)
+    return this.captureToFirstText.get(target)!.record(now - onset)
   }
 
   /** One shape for a diagnostics panel and the unit suite alike. */
@@ -569,6 +569,7 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
     // Every text frame reaches a surface now that idle retirement advances the
     // cursors instead of quarantining (fix-caption-idle-turn-boundary), so
     // every text frame is fair to measure.
+    let latencyChanged = false
     for (const [text, pending, trackers] of [
       [parsed.inputText, this.awaitingRecognition, this.recognition],
       [parsed.outputText, this.awaitingTranslation, this.translation],
@@ -576,13 +577,21 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
       const onset = pending.get(target)
       if (text && onset !== undefined) {
         pending.delete(target)
-        trackers.get(target)?.record(receivedAt - onset)
+        latencyChanged = trackers.get(target)!.record(receivedAt - onset) || latencyChanged
+        if (pending === this.awaitingTranslation) {
+          // Only the translating target emits output under the pinned protocol.
+          // Its peer must not carry this run into the next direction switch.
+          // A peer already armed for a different run still owns that sample.
+          for (const peer of this.pair) {
+            if (pending.get(peer) === onset) pending.delete(peer)
+          }
+        }
       }
     }
     if (parsed.inputText || parsed.outputText) {
-      this.noteFirstText(target, receivedAt)
-      this.reportLatency()
+      latencyChanged = this.noteFirstText(target, receivedAt) || latencyChanged
     }
+    if (latencyChanged) this.reportLatency()
     this.publishCoordinatorEvents(this.coordinator.accept(target, parsed, receivedAt))
   }
 

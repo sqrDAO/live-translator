@@ -447,3 +447,34 @@ it('coalesces progressive updates at the configured cadence', async () => {
   expect(sink.partials()[1]?.utterance.original).toBe('Hello everyone')
   await engine.stop()
 })
+
+
+it('measures direction switches from the matching run and notifies only for new samples', async () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(10_000)
+  const onLatency = vi.fn()
+  const { engine } = makeHarness({ onLatency })
+  const [viTarget, enTarget] = await start(engine)
+  engine.pushAudio('English speech')
+  await vi.advanceTimersByTimeAsync(3_000)
+  // Output-only frames isolate metric notifications from sink publications.
+  viTarget.receive(liveMessage('', 'Xin chào'))
+  await flush()
+  expect(engine.latency.captureToFirstTranslation.vi).toMatchObject({ p50: 3000, count: 1 })
+  expect(engine.latency.captureToFirstTranslation.en).toBeNull()
+  await vi.advanceTimersByTimeAsync(17_000)
+  engine.pushAudio('Vietnamese speech')
+  await vi.advanceTimersByTimeAsync(3_000)
+  enTarget.receive(liveMessage('', 'Hello'))
+  await flush()
+  expect(engine.latency.captureToFirstTranslation.en).toMatchObject({ p50: 3000, p95: 3000, worst: 3000, count: 1 })
+  const notifications = onLatency.mock.calls.length
+  enTarget.receive(liveMessage('', ' everyone'))
+  await flush()
+  expect(onLatency).toHaveBeenCalledTimes(notifications)
+  // Recognition is still a separate sample even after output has arrived.
+  enTarget.receive(liveMessage('1234', ''))
+  await flush()
+  expect(onLatency.mock.calls.length).toBeGreaterThan(notifications)
+  await engine.stop()
+})

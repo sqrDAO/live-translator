@@ -44,8 +44,8 @@ export class LatencyTracker {
    * timestamp read earlier than the one it is subtracted from. Recording the
    * negative result would drag p50 toward a latency no room ever saw.
    */
-  record(ms: number): void {
-    if (!Number.isFinite(ms) || ms < 0) return
+  record(ms: number): boolean {
+    if (!Number.isFinite(ms) || ms < 0) return false
 
     this.total += 1
     // `worst` is all-time while p50 is windowed: the window keeps the median
@@ -55,6 +55,7 @@ export class LatencyTracker {
 
     this.samples.push(ms)
     if (this.samples.length > this.capacity) this.samples.shift()
+    return true
   }
 
   /** `null` until a sample exists, so a panel shows "—" rather than "0 ms". */
