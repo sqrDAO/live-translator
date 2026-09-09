@@ -12,7 +12,7 @@ describe('latency sampling', () => {
   it('reports p50, worst and an all-time count', () => {
     const tracker = new LatencyTracker()
     for (const sample of [100, 900, 300, 200, 400]) tracker.record(sample)
-    expect(tracker.snapshot).toEqual({ p50: 300, worst: 900, count: 5 })
+    expect(tracker.snapshot).toEqual({ p50: 300, p95: 900, worst: 900, count: 5 })
   })
 
   it('keeps the worst case after it has aged out of the p50 window', () => {
@@ -20,6 +20,15 @@ describe('latency sampling', () => {
     tracker.record(5_000)
     for (const sample of [10, 10, 10, 10]) tracker.record(sample)
     expect(tracker.snapshot).toMatchObject({ p50: 10, worst: 5_000, count: 5 })
+  })
+
+  it('computes a windowed p95 independently of the all-time worst', () => {
+    const tracker = new LatencyTracker(20)
+    tracker.record(10_000)
+    for (let sample = 1; sample <= 20; sample++) tracker.record(sample)
+    expect(tracker.snapshot).toEqual({ p50: 10, p95: 19, worst: 10_000, count: 21 })
+    tracker.reset()
+    expect(tracker.snapshot).toBeNull()
   })
 
   it('drops a negative sample (an NTP correction mid-session) rather than recording it', () => {

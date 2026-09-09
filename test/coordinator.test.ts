@@ -112,3 +112,14 @@ describe('utterance caps', () => {
     expect(b.finalizeIdle(at + 1)).toEqual([])
   })
 })
+
+
+it('bounds a source-only preview without cutting it at the source sentence cap', () => {
+  const c = new TargetTurnCoordinator(IDLE, {
+    pair: enVi.pair, detect: enVi.detect, forcedSourceLang: 'en',
+    allowSourceOnly: true, maxUtteranceMs: 10_000, maxUtteranceSentences: 1,
+  })
+  expect(c.accept('vi', { inputText: 'Hello everyone.' }, 1000)[0]?.kind).toBe('partial')
+  expect(c.finalizeIdle(3000)).toEqual([])
+  expect(c.finalizeIdle(11000)[0]).toMatchObject({ kind: 'final', utteranceId: 'u0', merged: { translated: '' } })
+})

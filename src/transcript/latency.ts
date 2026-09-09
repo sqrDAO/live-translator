@@ -17,6 +17,8 @@
 export interface LatencySnapshot {
   /** Median over the retained window, rounded to the millisecond. */
   p50: number
+  /** Nearest-rank 95th percentile over the retained window. */
+  p95: number
   /** Largest sample since the tracker was created. Not windowed. */
   worst: number
   /** Every sample ever recorded, not just the retained ones. */
@@ -60,6 +62,7 @@ export class LatencyTracker {
     if (this.samples.length === 0) return null
     return {
       p50: median(this.samples),
+      p95: Math.round([...this.samples].sort((a, b) => a - b)[Math.ceil(this.samples.length * 0.95) - 1]!),
       worst: Math.round(this.worstMs),
       count: this.total,
     }

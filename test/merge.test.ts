@@ -344,3 +344,11 @@ describe('a third pair drives the merge without touching src/transcript', () => 
 // Compile-time guard: the fragment shape carries no app identifier.
 const _shape: IncomingFragment = { utteranceId: 'u0', targetLang: 'en', final: false, receivedAt: 0 }
 void _shape
+
+
+it('requires language evidence for source previews and still rejects a wrong-language translation', () => {
+  const m = new UtteranceMerger({ pair: enVi.pair, detect: enVi.detect, allowSourceOnly: true })
+  expect(m.add({ utteranceId: 'ambiguous', targetLang: 'vi', originalText: '2026', final: false, receivedAt: now })).toBeNull()
+  expect(m.add({ utteranceId: 'speech', targetLang: 'vi', originalText: 'Hello everyone', final: false, receivedAt: now })).toMatchObject({ sourceLang: 'en', translated: '' })
+  expect(m.add({ utteranceId: 'speech', targetLang: 'vi', translatedText: 'Hello everyone', final: false, receivedAt: now + 1 })).toBeNull()
+})

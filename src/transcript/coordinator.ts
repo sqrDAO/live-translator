@@ -52,6 +52,7 @@ export interface TargetTurnCoordinatorOptions {
   pair: LanguagePair
   detect: LanguageDetector
   forcedSourceLang?: LangTag
+  allowSourceOnly?: boolean
   /**
    * An utterance's ceiling, in sentences and in wall time
    * (caption-utterance-cap). Idle retirement is the only turn boundary the
@@ -85,11 +86,12 @@ export class TargetTurnCoordinator {
     assertLanguagePair(options.pair)
     this.pair = options.pair
     for (const target of this.pair) this.targetTurns.set(target, 0)
-    this.maxUtteranceMs = options.maxUtteranceMs ?? Number.POSITIVE_INFINITY
+    this.maxUtteranceMs = options.maxUtteranceMs ?? (options.allowSourceOnly ? 10_000 : Number.POSITIVE_INFINITY)
     this.maxUtteranceSentences = options.maxUtteranceSentences ?? Number.POSITIVE_INFINITY
     this.merger = new UtteranceMerger({
       pair: options.pair,
       detect: options.detect,
+      allowSourceOnly: options.allowSourceOnly ?? false,
       ...(options.forcedSourceLang ? { forcedSourceLang: options.forcedSourceLang } : {}),
     })
   }
@@ -152,7 +154,7 @@ export class TargetTurnCoordinator {
     // a per-target remainder and is the kind of surgery this pipeline has
     // already been burned by. Counted on the source transcript, not the
     // translation, so the boundary is the speaker's rather than the model's.
-    if (merged && countSentences(merged.original) >= this.maxUtteranceSentences) {
+    if (merged?.translated && countSentences(merged.original) >= this.maxUtteranceSentences) {
       return this.retire(turnIndex, 'final')
     }
 
@@ -172,7 +174,11 @@ export class TargetTurnCoordinator {
     for (const [turnIndex, state] of [...this.turns]) {
       const quiet = now - state.lastUpdatedAt >= this.idleFinalizeMs
       const overlong = now - state.startedAt >= this.maxUtteranceMs
-      if (!quiet && !overlong) continue
+      // A source preview must not retire before its delayed translation can
+      // join it. Keep it until output arrives or the existing age cap expires.
+      const preview = this.merger.get(idFor(turnIndex))
+      const awaitingTranslation = preview && !preview.translated
+      if (!overlong && (!quiet || awaitingTranslation)) continue
       publications.push(...this.retire(turnIndex, 'final'))
     }
     return publications

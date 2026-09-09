@@ -199,3 +199,42 @@ npm install
 npm run verify        # lint + typecheck + test + build
 npm test              # the whole suite: no network, no credentials, no emulator
 ```
+
+
+### Progressive captions and latency diagnostics
+
+Set `allowSourceOnly: true` on `LiveTranslateEngine` to publish recognized
+speech before its translation. `translated: ''` means translation is pending
+(or unavailable when `final` is true). Render a pending label and update the
+same `utteranceId` when translation arrives. Existing hosts retain bilingual-only
+publication by default; the memory host enables progressive captions.
+
+A source-only preview waits for translation through the normal idle timeout,
+up to the existing 10-second utterance age cap. The source sentence cap waits
+for translation too. This accommodates delayed output, but without protocol
+alignment IDs, output arriving after retirement can still belong to a later
+utterance. The age cap is a bound, not a guarantee of translation completeness.
+
+`partialSegmentIntervalMs` controls partial sink writes (default 250 ms; the
+memory host uses 100 ms). Finals bypass the interval. Remote sinks should choose
+a cadence suited to their write cost; audio remains in 100 ms chunks and model
+endpoint silence remains 800 ms.
+
+`onLatency` reports `captureToFirstRecognition` and `captureToFirstTranslation`
+per target alongside the existing first-text and text-to-publication figures.
+Snapshots include windowed p50/p95, all-time worst, and count, reset at start.
+Both capture metrics start at the first delivered voiced chunk, so they include
+speaking time and exclude prior device/capture buffering. Translation measures
+first output text, which may be an echo; silent targets have no sample. Unmatched
+speech runs retain their onset and can overstate the next sample. These are
+not speech-end-to-response or screen-paint measurements. Publication timing
+includes socket decode/queueing through sink completion, not a remote display.
+
+For a live comparison, replay the same EN/VI recordings at real-time speed:
+short phrases, natural pauses, continuous speech, names/numbers, quiet voices,
+and background noise. Record recognition and output p50/p95 plus missing words,
+translation errors, and utterance alignment. Compare 250 vs 100 ms publishing
+first. Test 500/650/800 ms endpointing only after decoupling speech-run detection
+from the 600 ms local gate hangover; changing the silence constant alone is unsafe.
+Model-specific recognition adapters and endpoint tuning require separate live
+benchmarks; fixture tests do not establish provider latency or accuracy.
