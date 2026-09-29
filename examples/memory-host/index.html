@@ -25,6 +25,21 @@
       rel="stylesheet"
     />
     <title>live-translate — memory host</title>
+    <!-- Theme before first paint, so a light visitor never sees a dark flash.
+         Same rule as src/theme.ts: a stored choice, else the OS setting. -->
+    <script>
+      // Only the read is guarded: storage that refuses it (some private
+      // modes) means no stored choice, and the OS setting still decides.
+      var t = null
+      try {
+        t = localStorage.getItem('live-translate:theme')
+      } catch (e) {}
+      if (t === 'light' || (t !== 'dark' && matchMedia('(prefers-color-scheme: light)').matches)) {
+        document.documentElement.dataset.theme = 'light'
+        // The light canvas; theme.ts re-reads it from the token once CSS loads.
+        document.querySelector('meta[name="theme-color"]').content = '#faf9f6'
+      }
+    </script>
   </head>
   <body>
     <a class="skip" href="#feed">Skip to transcript</a>
@@ -55,6 +70,27 @@
         </div>
         <div class="meta">
           <button type="button" class="history-button" id="history-open">History</button>
+          <!-- Cycles system → light/dark → system. Icon-only, so theme.ts
+               keeps its label naming the setting and the next step; the icon
+               shows the setting (half disc = follow the system). -->
+          <button type="button" class="theme-toggle" id="theme-toggle" data-choice="system" aria-label="Theme: system">
+            <svg class="icon-system" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2" />
+              <path fill="currentColor" d="M12 4a8 8 0 0 1 0 16Z" />
+            </svg>
+            <svg class="icon-sun" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <circle cx="12" cy="12" r="4.5" fill="currentColor" />
+              <path
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"
+              />
+            </svg>
+            <svg class="icon-moon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <path fill="currentColor" d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z" />
+            </svg>
+          </button>
           <!-- The pair is pinned into every minted token, like the direction,
                so switching restarts the feed. -->
           <select class="pair" id="pair" aria-label="Language pair">
