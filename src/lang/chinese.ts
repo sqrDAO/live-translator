@@ -27,11 +27,15 @@ export function withoutHan(text: string): string {
  *
  * Chinese is written without spaces, so it cannot be counted in whitespace
  * tokens the way English and Vietnamese are: a whole clause is one "token".
- * Each Han character is counted instead, weighed against Latin words. A
- * Chinese word runs about two characters, so Han must outnumber Latin words
- * two to one — enough that a Chinese line quoting a product name ("我们在
- * Solana 上部署") is Chinese, and an English line that kept a Chinese name
- * ("Welcome to 北京") is not.
+ * Each Han character is counted instead, weighed against Latin words, and
+ * Han must strictly outnumber them. That is enough for a Chinese line quoting
+ * a product name ("我们在 Solana 上部署") to be Chinese, and for an English
+ * line that kept a Chinese name ("Welcome to 北京") not to be.
+ *
+ * The bar was two to one until review found the line it lost: a Vietnamese
+ * name is one Latin word per syllable, so "你好，我是Nguyễn Văn Minh" (4 Han
+ * against 3 words) failed it, read as Vietnamese in a VI/ZH feed, and was
+ * vetoed as an echo — the speaker's own caption with it.
  *
  * One Han character with nothing else is Chinese: neither English nor
  * Vietnamese output carries Han, so it is strong evidence on its own.
@@ -40,5 +44,5 @@ export function isHanDominant(text: string): boolean {
   const han = text.match(HAN)?.length ?? 0
   if (han === 0) return false
   const latinWords = withoutHan(text).match(LATIN_WORD)?.length ?? 0
-  return han >= latinWords * 2
+  return han > latinWords
 }

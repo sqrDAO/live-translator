@@ -42,6 +42,12 @@ export interface MergedUtterance {
   sourceLang: LangTag
   original: string
   translated: string
+  /**
+   * Set when a translation arrived and was dropped for being in the wrong
+   * language (`LanguagePack.detectOutput`). `translated` is then empty but not
+   * pending: nothing better is coming for this text, so the turn may close.
+   */
+  translationRejected?: true
   final: boolean
   startedAt: number
   updatedAt: number
@@ -398,8 +404,10 @@ export class UtteranceMerger {
     // where a source-only host shows them; a host that needs a complete pair
     // gets nothing. It runs after the veto above so that an echo of the source
     // keeps being rejected whole, as it always was.
+    let translationRejected = false
     if (translated && offTarget(translated)) {
       translated = ''
+      translationRejected = true
       if (!this.options.allowSourceOnly) return null
     }
 
@@ -411,6 +419,7 @@ export class UtteranceMerger {
       sourceLang,
       original,
       translated,
+      ...(translationRejected ? { translationRejected: true as const } : {}),
       final: fragments.some((f) => f.final),
       startedAt: this.startedAt.get(utteranceId) ?? fragments[0]!.receivedAt,
       updatedAt: Math.max(...fragments.map((f) => f.receivedAt)),

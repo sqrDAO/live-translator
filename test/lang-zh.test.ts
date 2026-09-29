@@ -178,3 +178,44 @@ describe('translations in a language the session was not asked for', () => {
     expect(merger.get('u0')?.translated).toBe('')
   })
 })
+
+describe('review findings on PR #10', () => {
+  it('reads a Chinese line that keeps a romanized Vietnamese name as Chinese', () => {
+    // 4 Han against 3 Latin words failed the old two-to-one bar.
+    expect(detectViZh('你好，我是Nguyễn Văn Minh')).toBe('zh')
+    expect(detectEnZh('你好，我是Nguyễn Văn Minh')).toBe('zh')
+    // And an English line that kept a Chinese name is still English.
+    expect(detectEnZh('Welcome to 北京')).toBe('en')
+  })
+
+  it('keeps the Vietnamese caption when its Chinese translation keeps the name', () => {
+    const merger = new UtteranceMerger({ pair: viZh.pair, detect: viZh.detect, detectOutput: viZh.detectOutput!, allowSourceOnly: true })
+    merger.add({ utteranceId: 'u0', targetLang: 'zh', originalText: 'Xin chào, tôi là Nguyễn Văn Minh', translatedText: '你好，我是Nguyễn Văn Minh', final: false, receivedAt: now })
+    expect(merger.get('u0')).toMatchObject({ sourceLang: 'vi', translated: '你好，我是Nguyễn Văn Minh' })
+  })
+
+  it('does not read English quoting a Vietnamese place as Vietnamese', () => {
+    expect(detectViZh('Welcome to Đà Nẵng')).toBeNull()
+    expect(detectViZh('Chào mừng đến Đà Nẵng')).toBe('vi')
+  })
+
+  it('shows the Vietnamese caption untranslated when the English quotes a place', () => {
+    const merger = new UtteranceMerger({ pair: viZh.pair, detect: viZh.detect, detectOutput: viZh.detectOutput!, allowSourceOnly: true })
+    merger.add({ utteranceId: 'u0', targetLang: 'zh', originalText: 'Chào mừng đến Đà Nẵng', translatedText: 'Welcome to Đà Nẵng', final: false, receivedAt: now })
+    expect(merger.get('u0')).toMatchObject({ sourceLang: 'vi', original: 'Chào mừng đến Đà Nẵng', translated: '', translationRejected: true })
+  })
+
+  it('still applies the sentence cap when every translation is rejected', () => {
+    const c = new TargetTurnCoordinator(1500, {
+      pair: viZh.pair, detect: viZh.detect, detectOutput: viZh.detectOutput!, allowSourceOnly: true, maxUtteranceSentences: 2,
+    })
+    const published = c.accept(
+      'zh',
+      { inputText: 'Chào buổi sáng mọi người. Chúng ta sẽ thảo luận về bảo mật. ', outputText: 'Good morning everyone. We will discuss security. ' },
+      now,
+    )
+    const finals = published.filter((p) => p.kind === 'final')
+    expect(finals).toHaveLength(1)
+    expect(finals[0]).toMatchObject({ merged: { sourceLang: 'vi', translated: '' } })
+  })
+})

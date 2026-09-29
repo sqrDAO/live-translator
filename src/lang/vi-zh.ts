@@ -4,7 +4,7 @@
  */
 
 import { ZH, SIMPLIFIED_CLAUSE, isHanDominant, withoutHan } from './chinese.js'
-import { tokenize } from './english.js'
+import { EN_STOPWORDS, tokenize } from './english.js'
 import { detectOutputLanguage } from './en-vi.js'
 import type { LangTag, LanguagePack } from './types.js'
 import { VI, VI_LETTERS } from './vietnamese.js'
@@ -17,15 +17,22 @@ export { VI, ZH }
  * The two scripts do not overlap, so this is simpler than EN/VI: Chinese by
  * Han (`isHanDominant`, checked first so a Chinese line quoting "Đà Nẵng"
  * stays Chinese), Vietnamese when at least half the non-Han tokens carry a
- * Vietnamese letter. Undiacriticized text — a romanized name, digits, an
- * English product name — abstains.
+ * Vietnamese letter and they outnumber English function words. Undiacriticized
+ * text — a romanized name, digits, an English product name — abstains.
+ *
+ * English is not in this pair, but the model writes it anyway (see `viZh`),
+ * and English quoting a Vietnamese place ("Welcome to Đà Nẵng") must not read
+ * as Vietnamese: the merge would veto it as an echo and drop the speaker's
+ * caption, where abstaining lets `detectOutput` drop only the translation.
+ * The function-word guard is the same one `detectEnVi` applies.
  */
 export function detectViZh(text: string): LangTag | null {
   if (isHanDominant(text)) return ZH
 
   const tokens = tokenize(withoutHan(text)).filter((token) => token.length > 1)
   const viTokens = tokens.filter((token) => VI_LETTERS.test(token)).length
-  if (viTokens > 0 && viTokens * 2 >= tokens.length) return VI
+  const enTokens = tokens.filter((token) => EN_STOPWORDS.has(token)).length
+  if (viTokens > 0 && viTokens * 2 >= tokens.length && viTokens > enTokens) return VI
 
   return null
 }
