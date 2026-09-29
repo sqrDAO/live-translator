@@ -15,6 +15,7 @@ import { enZh } from '@sqrdao/live-translate/lang/en-zh'
 import { viZh } from '@sqrdao/live-translate/lang/vi-zh'
 
 import { MemorySink, type StoredUtterance } from './memory-sink'
+import { bindThemeToggle } from './theme'
 import { TranscriptHistory, TranscriptArchive, TRANSCRIPT_PREFIX, TRANSCRIPT_DELETE_PREFIX, transcriptText, type TranscriptRecorder, type TranscriptSession } from './transcript-history'
 
 /** The pairs the token endpoint accepts, by the id sent as `pair`. */
@@ -273,6 +274,8 @@ async function refreshDevices(): Promise<void> {
 void refreshDevices()
 
 // --- engine ------------------------------------------------------------------
+bindThemeToggle($<HTMLButtonElement>('#theme-toggle'), () => window.localStorage)
+
 const transcripts = new TranscriptHistory(() => window.localStorage)
 const archive = new TranscriptArchive(transcripts, renderStorageStatus)
 let recorder: TranscriptRecorder | null = null
