@@ -55,6 +55,7 @@ interface TurnState {
 export interface TargetTurnCoordinatorOptions {
   pair: LanguagePair
   detect: LanguageDetector
+  detectOutput?: LanguageDetector
   forcedSourceLang?: LangTag
   allowSourceOnly?: boolean
   /**
@@ -95,6 +96,7 @@ export class TargetTurnCoordinator {
     this.merger = new UtteranceMerger({
       pair: options.pair,
       detect: options.detect,
+      ...(options.detectOutput ? { detectOutput: options.detectOutput } : {}),
       allowSourceOnly: options.allowSourceOnly ?? false,
       ...(options.forcedSourceLang ? { forcedSourceLang: options.forcedSourceLang } : {}),
     })
@@ -173,7 +175,9 @@ export class TargetTurnCoordinator {
     // a per-target remainder and is the kind of surgery this pipeline has
     // already been burned by. Counted on the source transcript, not the
     // translation, so the boundary is the speaker's rather than the model's.
-    if (merged?.translated && countSentences(merged.original) >= this.maxUtteranceSentences) {
+    // A rejected translation counts as arrived: nothing is pending, and a
+    // feed whose every translation is rejected must still break long speech.
+    if ((merged?.translated || merged?.translationRejected) && countSentences(merged.original) >= this.maxUtteranceSentences) {
       return [...publications, ...this.retire(turnIndex, 'final')]
     }
 

@@ -31,9 +31,11 @@
 
   /* Source-language markers. Gold and teal are the system's warm/cool pair;
      gold stays dominant, teal appears only as decoration (a stripe, a dot).
-     Neither is ever the only signal — every marker sits beside a text label. */
+     Info blue marks Chinese, likewise only as a stripe. None is ever the
+     only signal — every marker sits beside a text label. */
   --mark-vi: var(--color-accent);
   --mark-en: var(--secondary-accent-main);
+  --mark-zh: var(--color-semantic-info);
 
   /* Semantic fills are the 700 shades. Semantic *text* and glows on this dark
      canvas are the 300 shades: 700 on #0A0A0A runs as low as 2.2:1. */
@@ -203,46 +205,26 @@ body {
   padding-top: 2px;
 }
 
-/* Chip: 4px radius, surface fill, hairline border. */
+/* Chip: 4px radius, surface fill, hairline border. A select, so the pair
+   can be changed where it is shown. */
 .pair {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-xs);
+  appearance: none;
   font-family: var(--font-label-font-family);
   font-weight: var(--font-label-font-weight);
   font-size: 0.6rem;
   letter-spacing: var(--font-label-letter-spacing);
+  color: var(--color-text-primary);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 4px;
   padding: 5px var(--spacing-sm);
   white-space: nowrap;
+  cursor: pointer;
+  transition: var(--component-button-transition);
 }
 
-.pair i {
-  font-style: normal;
-  color: var(--ink-faint);
-}
-
-.pair .vi {
-  color: var(--gold-ink);
-}
-
-/* Teal fails AA as small text on the dark canvas (3.96:1), so the EN side of
-   the chip is marked by a teal dot and set in primary ink. */
-.pair .en {
-  color: var(--color-text-primary);
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.pair .en::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--mark-en);
+.pair:hover {
+  border-color: var(--color-text-secondary);
 }
 
 .status {
@@ -320,8 +302,13 @@ body {
 
 /* Card: #1A1A1A on a #222 border at 16px, flat at rest — the system is
    flat-first and introduces elevation only on hover. */
+/* `flex-shrink: 0`: the feed is a scrolling flex column, and `overflow:
+   hidden` drops a card's minimum height to zero, so without it a full feed
+   squashed every card to fit and clipped the text — the translation line
+   first — instead of scrolling. */
 .utt {
   position: relative;
+  flex-shrink: 0;
   overflow: hidden;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -364,6 +351,10 @@ body {
 
 .utt[data-lang='en'] {
   --stripe: var(--mark-en);
+}
+
+.utt[data-lang='zh'] {
+  --stripe: var(--mark-zh);
 }
 
 .utt .tag {

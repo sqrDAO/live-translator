@@ -5,14 +5,40 @@ import {
   LiveTranslateEngine,
   type CaptureDiagnostics,
   type LangTag,
+  type LanguagePack,
   type LatencyReport,
   type MintToken,
   type TokenGrant,
 } from '@sqrdao/live-translate'
 import { enVi } from '@sqrdao/live-translate/lang/en-vi'
+import { enZh } from '@sqrdao/live-translate/lang/en-zh'
+import { viZh } from '@sqrdao/live-translate/lang/vi-zh'
 
 import { MemorySink, type StoredUtterance } from './memory-sink'
 import { TranscriptHistory, TranscriptArchive, TRANSCRIPT_PREFIX, TRANSCRIPT_DELETE_PREFIX, transcriptText, type TranscriptRecorder, type TranscriptSession } from './transcript-history'
+
+/** The pairs the token endpoint accepts, by the id sent as `pair`. */
+const PACKS: Readonly<Record<string, LanguagePack>> = { 'en-vi': enVi, 'en-zh': enZh, 'vi-zh': viZh }
+const PAIR_STORAGE_KEY = 'live-translate:pair'
+
+/** Each language named in itself, for the caption tag and the direction buttons. */
+const SHORT: Readonly<Record<LangTag, string>> = { en: 'EN', vi: 'VI', zh: '中文' }
+const ENDONYM: Readonly<Record<LangTag, string>> = { en: 'ENGLISH', vi: 'TIẾNG VIỆT', zh: '中文' }
+
+function rememberedPair(): string {
+  try {
+    const stored = window.localStorage.getItem(PAIR_STORAGE_KEY)
+    return stored && Object.hasOwn(PACKS, stored) ? stored : 'en-vi'
+  } catch {
+    return 'en-vi'
+  }
+}
+
+/**
+ * The language pair this feed interprets between. Like the direction it is
+ * pinned into every token, so it is read once per run and a change restarts.
+ */
+let pairId = rememberedPair()
 
 /**
  * The operator-declared speaker language, or `null` for Auto.
@@ -40,7 +66,7 @@ const mintToken: MintToken = async (target): Promise<TokenGrant> => {
     // engine makes on reconnect: the session prompt is pinned into the token,
     // so a reconnect that forgot it would silently return that half of the
     // feed to Auto mid-session.
-    body: JSON.stringify({ target, ...(speakerLang ? { speakerLang } : {}) }),
+    body: JSON.stringify({ pair: pairId, target, ...(speakerLang ? { speakerLang } : {}) }),
   })
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
@@ -65,6 +91,7 @@ const micBtn = $<HTMLButtonElement>('#mic')
 const deviceSel = $<HTMLSelectElement>('#device')
 const diagEl = $('#diag')
 const directionEl = $('#direction')
+const pairSel = $<HTMLSelectElement>('#pair')
 
 const STATUS_LABEL: Record<string, string> = {
   idle: 'sẵn sàng',
@@ -92,7 +119,8 @@ function renderUtterance(u: StoredUtterance): void {
   }
   el.dataset.lang = u.sourceLang
   el.classList.toggle('final', u.final)
-  el.querySelector('.tag')!.textContent = u.sourceLang === 'en' ? 'EN → TIẾNG VIỆT' : 'VI → ENGLISH'
+  const target = PACKS[pairId]!.pair.find((lang) => lang !== u.sourceLang) ?? ''
+  el.querySelector('.tag')!.textContent = `${SHORT[u.sourceLang] ?? u.sourceLang} → ${ENDONYM[target] ?? target}`
   el.querySelector('.original')!.textContent = u.original
   el.querySelector('.translated')!.textContent = u.translated || (u.final ? 'Chưa có bản dịch' : 'Đang dịch…')
   feed.scrollTo({ top: 0, behavior: 'smooth' })
@@ -161,6 +189,25 @@ function renderDiagnostics(d: CaptureDiagnostics): void {
   paint(true)
 }
 
+/**
+ * Measured latencies only, under one p50/p95 label. The session whose target
+ * is the speaker's own language never outputs, so an "output —" for it is the
+ * expected shape, not news, and printing it per language only buried the
+ * numbers that were measured.
+ */
+function latencyParts(): string[] {
+  const ms = (s: { p50: number; p95: number }) => `${s.p50}/${s.p95}ms`
+  const parts = PACKS[pairId]!.pair.flatMap((lang) => {
+    const recognition = lastLatency?.captureToFirstRecognition[lang]
+    const translation = lastLatency?.captureToFirstTranslation[lang]
+    return [
+      ...(recognition ? [`${lang} heard ${ms(recognition)}`] : []),
+      ...(translation ? [`${lang} out ${ms(translation)}`] : []),
+    ]
+  })
+  return parts.length ? [`onset→ (p50/p95): ${parts.join(', ')}`] : []
+}
+
 /** Throttled: frames arrive ~10/s per session and each one would repaint. */
 function paint(force = false): void {
   const now = Date.now()
@@ -181,11 +228,7 @@ function paint(force = false): void {
           ...(d.gatedWhileAudible > 0 ? [`⚠ ${d.gatedWhileAudible} gated while audible`] : []),
         ]
       : []),
-    ...(['en', 'vi'] as const).map((lang) => {
-      const recognition = lastLatency?.captureToFirstRecognition[lang]
-      const translation = lastLatency?.captureToFirstTranslation[lang]
-      return `${lang} onset→recognition ${recognition ? `${recognition.p50}/${recognition.p95}ms` : '—'}; onset→output ${translation ? `${translation.p50}/${translation.p95}ms` : '—'} (p50/p95)`
-    }),
+    ...latencyParts(),
     `${wire.sockets} sockets`,
     `${wire.frames} frames in`,
     ...(wire.closes > 0 ? [`⚠ ${wire.closes} closes (last ${wire.lastClose})`] : []),
@@ -423,7 +466,7 @@ function start(): void {
     onStatus: renderStatus,
   })
   engine = new LiveTranslateEngine({
-    languages: enVi,
+    languages: PACKS[pairId]!,
     allowSourceOnly: true,
     partialSegmentIntervalMs: 100,
     onLatency: (report) => { lastLatency = report; paint() },
@@ -476,6 +519,19 @@ micBtn.addEventListener('click', () => {
   else start()
 })
 
+/** Rebuilds the declared-direction buttons for the current pair; Auto stays. */
+function buildDirectionButtons(): void {
+  for (const button of directionEl.querySelectorAll('button[data-dir]:not([data-dir="auto"])')) button.remove()
+  const [first, second] = PACKS[pairId]!.pair
+  for (const [from, to] of [[first, second], [second, first]] as const) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.dataset.dir = from
+    button.textContent = `${SHORT[from] ?? from}→${SHORT[to] ?? to}`
+    directionEl.append(button)
+  }
+}
+
 function renderDirection(): void {
   for (const button of directionEl.querySelectorAll<HTMLButtonElement>('button[data-dir]')) {
     const selected = (button.dataset.dir === 'auto' ? null : button.dataset.dir) === speakerLang
@@ -490,17 +546,38 @@ directionEl.addEventListener('click', (event) => {
   if (chosen === speakerLang) return
   speakerLang = chosen
   renderDirection()
+  restartIfRunning()
+})
 
-  // The direction is pinned into every token this feed already minted, so a
-  // running engine cannot adopt it: the sessions would keep the prompt they
-  // opened with while the captions carried the new label. Tear down and
-  // rebuild — the feed clears and both sessions re-mint.
+pairSel.addEventListener('change', () => {
+  if (!Object.hasOwn(PACKS, pairSel.value) || pairSel.value === pairId) return
+  pairId = pairSel.value
+  try {
+    window.localStorage.setItem(PAIR_STORAGE_KEY, pairId)
+  } catch {
+    // A per-viewer convenience; the pair still applies to this page.
+  }
+  // A declared speaker language may not be in the new pair, and Auto is the
+  // only direction every pair shares.
+  speakerLang = null
+  buildDirectionButtons()
+  renderDirection()
+  restartIfRunning()
+})
+
+function restartIfRunning(): void {
+  // The pair and the direction are pinned into every token this feed already
+  // minted, so a running engine cannot adopt either: the sessions would keep
+  // the prompt they opened with while the captions carried the new label.
+  // Tear down and rebuild — the feed clears and both sessions re-mint.
   if (running) {
     void stop().then(() => {
-      // Restart with the latest direction after teardown finishes.
+      // Restart with the latest pair and direction after teardown finishes.
       if (!running) start()
     })
   }
-})
+}
 
+pairSel.value = pairId
+buildDirectionButtons()
 renderDirection()

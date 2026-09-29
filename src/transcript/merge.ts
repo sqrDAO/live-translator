@@ -42,6 +42,12 @@ export interface MergedUtterance {
   sourceLang: LangTag
   original: string
   translated: string
+  /**
+   * Set when a translation arrived and was dropped for being in the wrong
+   * language (`LanguagePack.detectOutput`). `translated` is then empty but not
+   * pending: nothing better is coming for this text, so the turn may close.
+   */
+  translationRejected?: true
   final: boolean
   startedAt: number
   updatedAt: number
@@ -206,31 +212,42 @@ function similarity(a: string, b: string): number {
  * figure, "the target is 2026." — which under-counts and so retires later than
  * asked. That is the safe direction: a late split shows one long caption, an
  * early split cuts a sentence in half.
+ *
+ * Full-width terminators (`。！？`) end a sentence with no space after them,
+ * since Chinese does not put one there; they never occur inside a figure.
  */
-const SENTENCE_END = /[.!?…]+(?=\s|$)/gu
+const SENTENCE_END = /[.!?…]+(?=\s|$)|[。！？]+/gu
 
 /**
  * How many complete sentences a transcript holds.
  *
- * Latin-punctuated languages share these terminators; a pair whose script
- * ends sentences differently (`。`) needs this widened, which is the one place
- * `src/transcript` knows anything about a script (caption-utterance-cap).
+ * Latin-punctuated languages share these terminators, and Chinese adds the
+ * full-width ones. This and `tokenize` are the only places `src/transcript`
+ * knows anything about a script (caption-utterance-cap).
  */
 export function countSentences(text: string): number {
   let sentences = 0
   for (const match of text.matchAll(SENTENCE_END)) {
     const preceding = match.index > 0 ? text[match.index - 1] : undefined
-    if (preceding && /\d/u.test(preceding)) continue
+    const fullWidth = /^[。！？]/u.test(match[0])
+    if (!fullWidth && preceding && /\d/u.test(preceding)) continue
     sentences += 1
   }
   return sentences
 }
 
+/**
+ * Word-ish tokens for the overlap ratio. Han characters are split one per
+ * token: Chinese is written without spaces, so whitespace alone would make a
+ * whole clause one token, and an echo that differed from its input by one
+ * character would share nothing with it.
+ */
 function tokenize(text: string): string[] {
   return text
     .toLowerCase()
     .normalize('NFC')
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\p{Script=Han}/gu, ' $& ')
     .split(/\s+/)
     .filter(Boolean)
 }
@@ -240,6 +257,8 @@ export interface UtteranceMergerOptions {
   pair: LanguagePair
   /** Text classifier for the pair; `null` abstains. */
   detect: LanguageDetector
+  /** Translation classifier that may answer outside the pair; see `LanguagePack.detectOutput`. */
+  detectOutput?: LanguageDetector
   /** Fragments shorter than this are treated as phantom noise. */
   minCharacters?: number
   /** Permit recognized source text before translation; empty translated means pending/missing. */
@@ -340,7 +359,8 @@ export class UtteranceMerger {
     // transcript is the original that translation was made from, so the pair
     // is internally consistent. The source-target session's transcript is the
     // fallback for a degraded one-session feed.
-    const translating = byTarget.get(otherOf(this.pair, sourceLang))
+    const target = otherOf(this.pair, sourceLang)
+    const translating = byTarget.get(target)
     const sourceSession = byTarget.get(sourceLang)
     const original = collapse(translating?.original || sourceSession?.original || '')
 
@@ -350,13 +370,17 @@ export class UtteranceMerger {
     // where the second-language session answered second-language speech in
     // the first language. The veto below still rejects whatever ends up
     // selected if it reads wrong.
+    const offTarget = (text: string) => {
+      const lang = this.options.detectOutput?.(text) ?? null
+      return lang !== null && lang !== target
+    }
     let translated = collapse(translating?.translated ?? '')
-    if (!translated || this.detect(translated) === sourceLang) {
+    if (!translated || this.detect(translated) === sourceLang || offTarget(translated)) {
       const flipped =
         sourceSession && !isPassthrough(sourceSession.original, sourceSession.translated)
           ? collapse(sourceSession.translated)
           : ''
-      if (flipped && this.detect(flipped) !== sourceLang) translated = flipped
+      if (flipped && this.detect(flipped) !== sourceLang && !offTarget(flipped)) translated = flipped
     }
 
     // Hosts opt in because existing sinks expect a complete bilingual pair.
@@ -374,6 +398,19 @@ export class UtteranceMerger {
     }
     if (detectedTranslated && detectedTranslated === sourceLang) return null
 
+    // A translation in a language the session was never asked for — English
+    // from a zh-target session in a VI/ZH feed (probed 2026-09-29) — is
+    // dropped, not published: the speaker's words still stand, untranslated,
+    // where a source-only host shows them; a host that needs a complete pair
+    // gets nothing. It runs after the veto above so that an echo of the source
+    // keeps being rejected whole, as it always was.
+    let translationRejected = false
+    if (translated && offTarget(translated)) {
+      translated = ''
+      translationRejected = true
+      if (!this.options.allowSourceOnly) return null
+    }
+
     const minCharacters = this.options.minCharacters ?? 2
     if (original.length < minCharacters) return null
 
@@ -382,6 +419,7 @@ export class UtteranceMerger {
       sourceLang,
       original,
       translated,
+      ...(translationRejected ? { translationRejected: true as const } : {}),
       final: fragments.some((f) => f.final),
       startedAt: this.startedAt.get(utteranceId) ?? fragments[0]!.receivedAt,
       updatedAt: Math.max(...fragments.map((f) => f.receivedAt)),

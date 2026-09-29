@@ -14,7 +14,9 @@
  */
 
 import { enVi } from '../src/lang/en-vi.js'
-import type { LangTag } from '../src/lang/types.js'
+import { enZh } from '../src/lang/en-zh.js'
+import type { LangTag, LanguagePack } from '../src/lang/types.js'
+import { viZh } from '../src/lang/vi-zh.js'
 import {
   mintSessionToken,
   type MintSessionTokenInput,
@@ -28,8 +30,18 @@ export interface TokenEndpointResult {
 
 type Mint = (input: MintSessionTokenInput) => Promise<SessionTokenGrant>
 
+/**
+ * The pairs a caller may ask for, by the id the browser sends as `pair`.
+ * Absent means `en-vi`, the only pair callers sent before the others existed.
+ */
+export const LANGUAGE_PACKS: Readonly<Record<string, LanguagePack>> = {
+  'en-vi': enVi,
+  'en-zh': enZh,
+  'vi-zh': viZh,
+}
+
 /** Vercel parses a JSON body for us; a raw string is still accepted. */
-function parseBody(body: unknown): { target?: unknown; speakerLang?: unknown } | null {
+function parseBody(body: unknown): { pair?: unknown; target?: unknown; speakerLang?: unknown } | null {
   let parsed = body
   if (typeof parsed === 'string') {
     try {
@@ -39,13 +51,20 @@ function parseBody(body: unknown): { target?: unknown; speakerLang?: unknown } |
     }
   }
   if (!parsed || typeof parsed !== 'object') return null
-  return parsed as { target?: unknown; speakerLang?: unknown }
+  return parsed as { pair?: unknown; target?: unknown; speakerLang?: unknown }
 }
 
-function readLang(value: unknown): LangTag | null {
-  if (value === 'en') return 'en'
-  if (value === 'vi') return 'vi'
-  return null
+function readPack(value: unknown): LanguagePack | null {
+  if (value === undefined || value === null) return enVi
+  return typeof value === 'string' && Object.hasOwn(LANGUAGE_PACKS, value) ? LANGUAGE_PACKS[value]! : null
+}
+
+function readLang(value: unknown, pack: LanguagePack): LangTag | null {
+  return pack.pair.find((lang) => lang === value) ?? null
+}
+
+function oneOf(pack: LanguagePack): string {
+  return pack.pair.map((lang) => JSON.stringify(lang)).join(' or ')
 }
 
 /**
@@ -64,9 +83,13 @@ export async function handleTokenRequest(input: {
   }
 
   const body = parseBody(input.body)
-  const target = readLang(body?.target)
+  const languages = readPack(body?.pair)
+  if (!languages) {
+    return { status: 400, body: { error: `pair must be one of ${Object.keys(LANGUAGE_PACKS).join(', ')}` } }
+  }
+  const target = readLang(body?.target, languages)
   if (!target) {
-    return { status: 400, body: { error: 'target must be "en" or "vi"' } }
+    return { status: 400, body: { error: `target must be ${oneOf(languages)}` } }
   }
 
   // Optional: the operator-declared speaker language
@@ -78,9 +101,9 @@ export async function handleTokenRequest(input: {
   // to Auto: the caller asked for a direction, and a feed that quietly went
   // back to guessing would look exactly like one that had not.
   const declared = body?.speakerLang
-  const speakerLang = declared === undefined || declared === null ? null : readLang(declared)
+  const speakerLang = declared === undefined || declared === null ? null : readLang(declared, languages)
   if (declared !== undefined && declared !== null && !speakerLang) {
-    return { status: 400, body: { error: 'speakerLang must be "en" or "vi"' } }
+    return { status: 400, body: { error: `speakerLang must be ${oneOf(languages)}` } }
   }
 
   if (!input.apiKey) {
@@ -105,7 +128,7 @@ export async function handleTokenRequest(input: {
     const grant = await mint({
       apiKey: input.apiKey,
       model: input.model,
-      languages: enVi,
+      languages,
       target,
       ...(speakerLang ? { speakerLang } : {}),
     })

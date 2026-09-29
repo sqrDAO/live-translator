@@ -68,9 +68,22 @@ type LanguageDetector = (text: string) => LangTag | null   // null = abstain
 ```
 
 An abstention must leave behavior exactly as if no detector had been consulted.
-The bundled EN/VI implementation ships as a **separate entry point**,
-`@sqrdao/live-translate/lang/en-vi`, not as core: another language pair needs a
-different one.
+The bundled packs ship as **separate entry points**, not as core: another
+language pair needs a different one.
+
+| Entry point | Pair | Notes |
+| --- | --- | --- |
+| `@sqrdao/live-translate/lang/en-vi` | English ⇄ Vietnamese | the production pack |
+| `@sqrdao/live-translate/lang/en-zh` | English ⇄ Chinese | Mandarin speech, Simplified output (`'zh'`) |
+| `@sqrdao/live-translate/lang/vi-zh` | Vietnamese ⇄ Chinese | Mandarin speech, Simplified output (`'zh'`); **declare VI→ZH for Vietnamese speakers** — in Auto the model answers Vietnamese speech in English (probed 2026-09-29), and that translation is dropped |
+
+Each bundled pack also carries `detectOutput`, a translation classifier that
+knows all three bundled languages. A translation it places in any language but
+its session's target is dropped: a source-only host shows the speaker's words
+untranslated, and a host that needs a complete pair gets nothing.
+
+The engine still runs exactly two sessions, so a feed interprets one pair at a
+time; a host picks the pack per feed.
 
 ### 3. `mintToken` — how a session is authorized
 
@@ -116,7 +129,7 @@ const grant = await mintSessionToken({
   apiKey: process.env.GEMINI_API_KEY!,
   model: process.env.GEMINI_LIVE_MODEL,     // verified per deployment (see ADR-001)
   languages: enVi,
-  target,                                   // 'en' | 'vi'
+  target,                                   // a tag in the pack's pair, e.g. 'en' | 'vi'
   // context: { eventName, sessionTitle, speakers, glossary }   // optional, host-assembled
 })
 ```

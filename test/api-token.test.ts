@@ -144,3 +144,41 @@ describe('api/token — the operator-declared direction', () => {
     expect(calls).toHaveLength(0)
   })
 })
+
+/**
+ * The pair is pinned into the token just as the direction is, so the endpoint
+ * must mint against the pack the page asked for — and a page that sends no
+ * pair, as every page did before Chinese, must keep getting EN/VI.
+ */
+describe('api/token — the language pair', () => {
+  it('defaults to EN/VI when no pair is sent', async () => {
+    const { mint, calls } = stubMint()
+    expect((await handleTokenRequest({ ...ok, body: { target: 'vi' }, mint })).status).toBe(200)
+    expect(calls[0]!.languages.pair).toEqual(['en', 'vi'])
+  })
+
+  it('mints against the requested Chinese pair', async () => {
+    const { mint, calls } = stubMint()
+    for (const [pair, target, speakerLang] of [['en-zh', 'zh', 'en'], ['vi-zh', 'vi', 'zh']] as const) {
+      const result = await handleTokenRequest({ ...ok, body: { pair, target, speakerLang }, mint })
+      expect(result.status).toBe(200)
+    }
+    expect(calls.map((call) => [call.languages.pair, call.target, call.speakerLang])).toEqual([
+      [['en', 'zh'], 'zh', 'en'],
+      [['vi', 'zh'], 'vi', 'zh'],
+    ])
+  })
+
+  it('refuses an unknown pair, and a target or direction outside the chosen pair', async () => {
+    const { mint, calls } = stubMint()
+    for (const body of [
+      { pair: 'en-fr', target: 'en' },
+      { pair: 'toString', target: 'en' },
+      { pair: 'en-zh', target: 'vi' },
+      { pair: 'vi-zh', target: 'zh', speakerLang: 'en' },
+    ]) {
+      expect((await handleTokenRequest({ ...ok, body, mint })).status).toBe(400)
+    }
+    expect(calls).toHaveLength(0)
+  })
+})
