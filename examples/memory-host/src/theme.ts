@@ -48,17 +48,21 @@ export function currentTheme(root: HTMLElement = document.documentElement): Them
  */
 export function bindThemeToggle(button: HTMLButtonElement, storage: () => ThemeStorage): () => void {
   const media = window.matchMedia('(prefers-color-scheme: light)')
+  // The viewer's click, held here too: when storage refuses the write (some
+  // private modes), the choice must still outrank the OS for this page.
+  let chosen: Theme | null = storedTheme(storage)
   const render = (): void => {
     const light = currentTheme() === 'light'
     button.setAttribute('aria-pressed', String(light))
     button.title = light ? 'Switch to dark theme' : 'Switch to light theme'
   }
 
-  applyTheme(resolveTheme(storedTheme(storage), media.matches))
+  applyTheme(resolveTheme(chosen, media.matches))
   render()
 
   button.addEventListener('click', () => {
     const next: Theme = currentTheme() === 'light' ? 'dark' : 'light'
+    chosen = next
     applyTheme(next)
     try {
       storage().setItem(THEME_STORAGE_KEY, next)
@@ -70,7 +74,7 @@ export function bindThemeToggle(button: HTMLButtonElement, storage: () => ThemeS
 
   // Follow the OS only until the viewer has chosen.
   media.addEventListener('change', (event) => {
-    if (storedTheme(storage)) return
+    if (chosen ?? storedTheme(storage)) return
     applyTheme(event.matches ? 'light' : 'dark')
     render()
   })

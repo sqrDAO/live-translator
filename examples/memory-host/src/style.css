@@ -10,6 +10,9 @@
 @import './tokens/sqrdao.css';
 
 :root {
+  /* Native parts (scrollbars, option lists, form chrome) follow the theme. */
+  color-scheme: dark;
+
   /* Derived, not invented: a third text level the system does not name, mixed
      down from secondary text toward the page so it tracks both modes. */
   --ink-faint: color-mix(in srgb, var(--color-text-secondary) 62%, var(--color-background));
@@ -42,6 +45,7 @@
 }
 
 [data-theme='light'] {
+  color-scheme: light;
   --track: var(--color-surface-alt);
   --rec-ink: var(--color-semantic-error);
 }

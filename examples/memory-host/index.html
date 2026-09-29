@@ -30,8 +30,11 @@
     <script>
       try {
         var t = localStorage.getItem('live-translate:theme')
-        if (t === 'light' || (t !== 'dark' && matchMedia('(prefers-color-scheme: light)').matches))
+        if (t === 'light' || (t !== 'dark' && matchMedia('(prefers-color-scheme: light)').matches)) {
           document.documentElement.dataset.theme = 'light'
+          // The light canvas; theme.ts re-reads it from the token once CSS loads.
+          document.querySelector('meta[name="theme-color"]').content = '#faf9f6'
+        }
       } catch (e) {}
     </script>
   </head>
