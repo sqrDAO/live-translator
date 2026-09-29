@@ -302,8 +302,13 @@ body {
 
 /* Card: #1A1A1A on a #222 border at 16px, flat at rest — the system is
    flat-first and introduces elevation only on hover. */
+/* `flex-shrink: 0`: the feed is a scrolling flex column, and `overflow:
+   hidden` drops a card's minimum height to zero, so without it a full feed
+   squashed every card to fit and clipped the text — the translation line
+   first — instead of scrolling. */
 .utt {
   position: relative;
+  flex-shrink: 0;
   overflow: hidden;
   background: var(--color-surface);
   border: 1px solid var(--color-border);

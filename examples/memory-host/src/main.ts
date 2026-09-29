@@ -189,6 +189,25 @@ function renderDiagnostics(d: CaptureDiagnostics): void {
   paint(true)
 }
 
+/**
+ * Measured latencies only, under one p50/p95 label. The session whose target
+ * is the speaker's own language never outputs, so an "output —" for it is the
+ * expected shape, not news, and printing it per language only buried the
+ * numbers that were measured.
+ */
+function latencyParts(): string[] {
+  const ms = (s: { p50: number; p95: number }) => `${s.p50}/${s.p95}ms`
+  const parts = PACKS[pairId]!.pair.flatMap((lang) => {
+    const recognition = lastLatency?.captureToFirstRecognition[lang]
+    const translation = lastLatency?.captureToFirstTranslation[lang]
+    return [
+      ...(recognition ? [`${lang} heard ${ms(recognition)}`] : []),
+      ...(translation ? [`${lang} out ${ms(translation)}`] : []),
+    ]
+  })
+  return parts.length ? [`onset→ (p50/p95): ${parts.join(', ')}`] : []
+}
+
 /** Throttled: frames arrive ~10/s per session and each one would repaint. */
 function paint(force = false): void {
   const now = Date.now()
@@ -209,11 +228,7 @@ function paint(force = false): void {
           ...(d.gatedWhileAudible > 0 ? [`⚠ ${d.gatedWhileAudible} gated while audible`] : []),
         ]
       : []),
-    ...PACKS[pairId]!.pair.map((lang) => {
-      const recognition = lastLatency?.captureToFirstRecognition[lang]
-      const translation = lastLatency?.captureToFirstTranslation[lang]
-      return `${lang} onset→recognition ${recognition ? `${recognition.p50}/${recognition.p95}ms` : '—'}; onset→output ${translation ? `${translation.p50}/${translation.p95}ms` : '—'} (p50/p95)`
-    }),
+    ...latencyParts(),
     `${wire.sockets} sockets`,
     `${wire.frames} frames in`,
     ...(wire.closes > 0 ? [`⚠ ${wire.closes} closes (last ${wire.lastClose})`] : []),

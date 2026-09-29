@@ -29,6 +29,18 @@ export function detectViZh(text: string): LangTag | null {
   return null
 }
 
+/**
+ * PROBED 2026-09-29 against `gemini-3.5-live-translate-preview`, in the
+ * browser with synthesized speech:
+ *   * Chinese speech, Auto: the vi session translates into Vietnamese and the
+ *     zh session stays silent, the same shape as EN/VI.
+ *   * Vietnamese speech, Auto: the zh session translates into **English**,
+ *     not Chinese. Adding "Never respond in English." to the instruction did
+ *     not change it, so the clause is not pinned.
+ *   * Vietnamese speech, declared VI→ZH: correct Simplified Chinese.
+ * Until Auto is fixed, a VI/ZH feed with Vietnamese speakers should declare
+ * the direction.
+ */
 export const viZh: LanguagePack = {
   pair: [VI, ZH],
   names: { [VI]: 'Vietnamese', [ZH]: 'Chinese' },
