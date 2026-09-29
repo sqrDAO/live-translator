@@ -55,7 +55,13 @@
         </div>
         <div class="meta">
           <button type="button" class="history-button" id="history-open">History</button>
-          <span class="pair"><b class="vi">VI</b><i>⇄</i><b class="en">EN</b></span>
+          <!-- The pair is pinned into every minted token, like the direction,
+               so switching restarts the feed. -->
+          <select class="pair" id="pair" aria-label="Language pair">
+            <option value="en-vi">VI ⇄ EN</option>
+            <option value="en-zh">中文 ⇄ EN</option>
+            <option value="vi-zh">VI ⇄ 中文</option>
+          </select>
           <!-- The status text changes as the feed moves through connecting,
                live, degraded and unavailable. Announce it: the dot beside it
                is colour, and colour is never the only signal. -->
@@ -95,8 +101,7 @@
                every minted token, so switching restarts the feed. -->
           <div class="direction" id="direction" role="group" aria-label="Translation direction">
             <button type="button" data-dir="auto" aria-pressed="true">AUTO</button>
-            <button type="button" data-dir="en" aria-pressed="false">EN→VI</button>
-            <button type="button" data-dir="vi" aria-pressed="false">VI→EN</button>
+            <!-- One button per speaker language, built from the pair. -->
           </div>
         </div>
       </footer>

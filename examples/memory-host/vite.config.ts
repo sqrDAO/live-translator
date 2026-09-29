@@ -10,6 +10,8 @@ export default defineConfig({
     alias: {
       '@sqrdao/live-translate/server': pkg('server/index.ts'),
       '@sqrdao/live-translate/lang/en-vi': pkg('lang/en-vi.ts'),
+      '@sqrdao/live-translate/lang/en-zh': pkg('lang/en-zh.ts'),
+      '@sqrdao/live-translate/lang/vi-zh': pkg('lang/vi-zh.ts'),
       '@sqrdao/live-translate': pkg('index.ts'),
     },
   },

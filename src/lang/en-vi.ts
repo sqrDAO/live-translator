@@ -8,106 +8,11 @@
  * list as if they were general.
  */
 
+import { EN, EN_MORPHOLOGY, EN_STOPWORDS, tokenize } from './english.js'
 import type { LangTag, LanguagePack } from './types.js'
+import { VI, VI_LETTERS, isVietnameseSyllable } from './vietnamese.js'
 
-export const EN: LangTag = 'en'
-export const VI: LangTag = 'vi'
-
-/** Any Vietnamese-specific letter (đ, breve/circumflex/horn vowels, tone marks). */
-const VI_LETTERS =
-  /[ăâđêôơưàảãáạằẳẵắặầẩẫấậèẻẽéẹềểễếệìỉĩíịòỏõóọồổỗốộờởỡớợùủũúụừửữứựỳỷỹýỵ]/u
-
-/**
- * Common English function words.
- *
- * A hit is required before ASCII-only text may be called English through this
- * route, so romanized names and numbers abstain instead. The list is
- * deliberately closed-class: content words belong to the syllable route
- * below, which does not need a vocabulary.
- *
- * Widened 2026-08-24 (fix-english-source-detection) after measuring the old
- * list against real conference fragments: "Good morning", "Next slide
- * please", "Any questions" and "Let's start" all abstained, and every
- * abstention landed on a source-language inference that was itself broken.
- * Only words that are not also plausible bare Vietnamese syllables were
- * added — the short ambiguous ones ('to', 'do', 'in', 'so') were already
- * here and are left as they were.
- */
-const EN_STOPWORDS = new Set([
-  'the', 'a', 'an', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 'be',
-  'been', 'am', 'i', 'you', 'we', 'they', 'he', 'she', 'it', 'this', 'that',
-  'these', 'those', 'to', 'of', 'in', 'on', 'at', 'for', 'with', 'from', 'by',
-  'as', 'so', 'if', 'then', 'than', 'not', 'no', 'yes', 'do', 'does', 'did',
-  'have', 'has', 'had', 'will', 'would', 'can', 'could', 'should', 'what',
-  'when', 'where', 'who', 'how', 'why', 'there', 'here', 'my', 'your', 'our',
-  'their', 'his', 'her', 'its', 'me', 'us', 'them', 'about', 'all', 'very',
-  'just', 'now', 'today', 'thank', 'thanks', 'hello', 'welcome', 'everyone',
-  's', 't', 're', 've', 'll', 'd',
-  // Added 2026-08-24.
-  'let', 'please', 'next', 'more', 'most', 'some', 'any', 'every', 'other',
-  'another', 'much', 'many', 'few', 'first', 'second', 'because', 'while',
-  'which', 'whose', 'whom', 'being', 'may', 'might', 'must', 'shall',
-  'going', 'want', 'need', 'know', 'think', 'said', 'says', 'see', 'look',
-  'make', 'made', 'take', 'get', 'give', 'come', 'good', 'great', 'right',
-  'through', 'during', 'without', 'within', 'into', 'onto', 'over', 'under',
-  'again', 'still', 'even', 'also', 'both', 'each', 'such', 'same', 'own',
-  'too', 'well', 'back', 'down', 'out', 'off', 'up', 'okay', 'sure',
-  'really', 'actually', 'maybe', 'everybody', 'something', 'nothing',
-])
-
-/**
- * Vietnamese syllable structure, as an acceptor.
- *
- * Vietnamese is monosyllabic and written one syllable per token, and the
- * syllable is a small closed grammar: an optional onset from a fixed
- * inventory, one to three vowels, an optional coda from a fixed inventory of
- * eight. Nothing else occurs — no consonant clusters after the onset, no
- * codas in `b d g k l r s v`, and no `f j w z` anywhere in the alphabet.
- *
- * A token this rejects is therefore not a Vietnamese word, whatever else it
- * may be. That is the negative evidence the detector was missing: it could
- * recognise Vietnamese by its diacritics, but it could only recognise English
- * by a closed-class function word, so content-word English — "Solana
- * validators", "Smart contract deployment", "Transaction throughput matters"
- * — abstained. Every one of those tokens fails this acceptor.
- *
- * The onset alternation is ordered longest-first so `ngh` wins over `ng` and
- * `ng` over `n`; `gi`/`qu` fall back to the bare consonant when no vowel
- * follows, which is what keeps "gì" and "quý" accepted.
- */
-const VI_VOWELS = 'aàảãáạăằẳẵắặâầẩẫấậeèẻẽéẹêềểễếệiìỉĩíịoòỏõóọôồổỗốộơờởỡớợuùủũúụưừửữứựyỳỷỹýỵ'
-const VI_SYLLABLE = new RegExp(
-  `^(?:ngh|ng|nh|ch|gh|gi|kh|ph|th|tr|qu|[bcdđghklmnpqrstvx])?[${VI_VOWELS}]{1,3}(?:ch|ng|nh|[cmnpt])?$`,
-  'u',
-)
-
-function isVietnameseSyllable(token: string): boolean {
-  return VI_SYLLABLE.test(token)
-}
-
-/**
- * English inflection and derivation, as suffixes.
- *
- * Failing the Vietnamese acceptor above says only "not Vietnamese", which two
- * romanized proper nouns satisfy as readily as two English words — and a pair
- * of names is exactly the text this detector is supposed to abstain on. So
- * the second route asks for one positive sign of English morphology as well.
- * "Solana validators" and "Transaction throughput matters" carry one;
- * "Blockchain Summit" and "Karaoke karaoke" do not, and go on abstaining.
- *
- * The four-letter floor keeps the short suffixes from matching what is really
- * a stem: `-er` must not fire on "her", `-ed` on "red", `-s` on "is".
- */
-const EN_MORPHOLOGY = /^.{2,}(?:ing|tion|sion|ment|ness|able|ible|ance|ence|ship|hood|ward|ally|ies|ers|ors|ist|ism|ity|ive|ous|ly|ed|er|or|s)$/u
-
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .normalize('NFC')
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-    .split(/\s+/)
-    .filter(Boolean)
-}
+export { EN, VI }
 
 /**
  * Classifies a text as Vietnamese, English, or neither, on proportional

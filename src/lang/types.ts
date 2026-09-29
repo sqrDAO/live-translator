@@ -5,8 +5,8 @@
  * and decides per utterance which of the two the speaker used. Nothing in
  * `src/transcript` or `src/session` names a language: the pair, the display
  * names and the text classifier are all supplied by a `LanguagePack`, and the
- * bundled EN/VI one lives in `./en-vi` (exported as
- * `@sqrdao/live-translate/lang/en-vi`), not in core.
+ * bundled ones — EN/VI, EN/ZH and VI/ZH — live in `./en-vi`, `./en-zh` and
+ * `./vi-zh` (exported as `@sqrdao/live-translate/lang/<pair>`), not in core.
  */
 
 /** A language tag as the host and the model agree on it: `'en'`, `'vi'`, `'ko'`… */

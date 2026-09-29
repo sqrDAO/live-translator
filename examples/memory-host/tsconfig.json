@@ -16,7 +16,9 @@
     "paths": {
       "@sqrdao/live-translate": ["../../src/index.ts"],
       "@sqrdao/live-translate/server": ["../../src/server/index.ts"],
-      "@sqrdao/live-translate/lang/en-vi": ["../../src/lang/en-vi.ts"]
+      "@sqrdao/live-translate/lang/en-vi": ["../../src/lang/en-vi.ts"],
+      "@sqrdao/live-translate/lang/en-zh": ["../../src/lang/en-zh.ts"],
+      "@sqrdao/live-translate/lang/vi-zh": ["../../src/lang/vi-zh.ts"]
     }
   },
   "include": ["src", "server.ts", "vite.config.ts", "test"]
