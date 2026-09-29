@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
 import { buildLiveSessionConfig } from '../src/gemini/config'
+import { detectOutputLanguage, enVi } from '../src/lang/en-vi'
 import { detectEnZh, enZh } from '../src/lang/en-zh'
 import { detectViZh, viZh } from '../src/lang/vi-zh'
+import { TargetTurnCoordinator } from '../src/transcript/coordinator'
 import { UtteranceMerger, countSentences, inferSourceLanguage, type IncomingFragment } from '../src/transcript/merge'
 
 const MODEL = 'gemini-3.5-live-translate-preview'
@@ -109,5 +111,70 @@ describe('Chinese in the transcript merge', () => {
     const merged = merger.get('u0')
     expect(merged?.sourceLang).toBe('zh')
     expect(merged?.translated).toBe('Good morning everyone, welcome to the forum.')
+  })
+})
+
+describe('translations in a language the session was not asked for', () => {
+  // PROBED 2026-09-29: in a VI/ZH feed on Auto, the zh-target session answered
+  // Vietnamese speech in English. VI/ZH's own detector abstains on English, so
+  // only the pack's output classifier can see it.
+  const vi = 'Chào buổi sáng mọi người, chào mừng đến với diễn đàn hôm nay.'
+  const english = 'Good morning everyone, welcome to the forum today.'
+
+  function viZhMerger(allowSourceOnly: boolean) {
+    return new UtteranceMerger({ pair: viZh.pair, detect: viZh.detect, detectOutput: viZh.detectOutput!, allowSourceOnly })
+  }
+
+  it('classifies output across all three bundled languages', () => {
+    expect(detectOutputLanguage(english)).toBe('en')
+    expect(detectOutputLanguage(vi)).toBe('vi')
+    expect(detectOutputLanguage('大家早上好，欢迎来到今天的论坛。')).toBe('zh')
+    // Abstains where no pack could decide: a lone kept product name.
+    expect(detectOutputLanguage('Solana')).toBeNull()
+  })
+
+  it('drops an English translation in VI/ZH, keeping the Vietnamese caption', () => {
+    const merger = viZhMerger(true)
+    merger.add({ utteranceId: 'u0', targetLang: 'vi', originalText: vi, final: false, receivedAt: now })
+    merger.add({ utteranceId: 'u0', targetLang: 'zh', originalText: vi, translatedText: english, final: false, receivedAt: now })
+    expect(merger.get('u0')).toMatchObject({ sourceLang: 'vi', original: vi, translated: '' })
+  })
+
+  it('publishes nothing for a host that needs a complete pair', () => {
+    const merger = viZhMerger(false)
+    merger.add({ utteranceId: 'u0', targetLang: 'zh', originalText: vi, translatedText: english, final: true, receivedAt: now })
+    expect(merger.get('u0')).toBeNull()
+  })
+
+  it('keeps an on-target translation, and one it cannot classify', () => {
+    const merger = viZhMerger(true)
+    merger.add({ utteranceId: 'u0', targetLang: 'zh', originalText: vi, translatedText: '大家早上好，欢迎来到今天的论坛。', final: false, receivedAt: now })
+    expect(merger.get('u0')?.translated).toBe('大家早上好，欢迎来到今天的论坛。')
+
+    // An early partial that is only a kept name abstains, so it streams on.
+    merger.add({ utteranceId: 'u1', targetLang: 'zh', originalText: 'Solana là', translatedText: 'Solana', final: false, receivedAt: now })
+    expect(merger.get('u1')?.translated).toBe('Solana')
+  })
+
+  it('reaches the merge through the coordinator the engine builds', () => {
+    const c = new TargetTurnCoordinator(1500, {
+      pair: viZh.pair, detect: viZh.detect, detectOutput: viZh.detectOutput!, allowSourceOnly: true,
+    })
+    const published = [
+      ...c.accept('vi', { inputText: vi }, now),
+      ...c.accept('zh', { inputText: vi, outputText: english }, now + 1),
+      ...c.finalizeIdle(now + 10_000),
+    ].flatMap((p) => ('merged' in p ? [p.merged] : []))
+    expect(published.length).toBeGreaterThan(0)
+    for (const merged of published) {
+      expect(merged.sourceLang).toBe('vi')
+      expect(merged.translated).toBe('')
+    }
+  })
+
+  it('also rejects Chinese from a session in EN/VI', () => {
+    const merger = new UtteranceMerger({ pair: enVi.pair, detect: enVi.detect, detectOutput: enVi.detectOutput!, allowSourceOnly: true })
+    merger.add({ utteranceId: 'u0', targetLang: 'vi', originalText: 'Good morning everyone', translatedText: '大家早上好', final: false, receivedAt: now })
+    expect(merger.get('u0')?.translated).toBe('')
   })
 })

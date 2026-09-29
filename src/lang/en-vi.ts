@@ -8,6 +8,7 @@
  * list as if they were general.
  */
 
+import { ZH, isHanDominant } from './chinese.js'
 import { EN, EN_MORPHOLOGY, EN_STOPWORDS, tokenize } from './english.js'
 import type { LangTag, LanguagePack } from './types.js'
 import { VI, VI_LETTERS, isVietnameseSyllable } from './vietnamese.js'
@@ -68,6 +69,18 @@ export function detectEnVi(text: string): LangTag | null {
 }
 
 /**
+ * The bundled packs' output classifier, over all three bundled languages:
+ * Chinese by script, then English or Vietnamese as `detectEnVi` reads them.
+ *
+ * Probed 2026-09-29: in a VI/ZH feed on Auto, the zh-target session answered
+ * Vietnamese speech in English. The pair's own detector abstains on English,
+ * so only a classifier that knows a language outside the pair can reject it.
+ */
+export function detectOutputLanguage(text: string): LangTag | null {
+  return isHanDominant(text) ? ZH : detectEnVi(text)
+}
+
+/**
  * The pack the production feed ran with. The instruction clause is pinned
  * into every EN/VI ephemeral token, so its wording is load-bearing: the
  * config test holds the whole instruction byte-for-byte against what shipped.
@@ -76,5 +89,6 @@ export const enVi: LanguagePack = {
   pair: [EN, VI],
   names: { [EN]: 'English', [VI]: 'Vietnamese' },
   detect: detectEnVi,
+  detectOutput: detectOutputLanguage,
   instructionClauses: ['Preserve Vietnamese diacritics exactly.'],
 }

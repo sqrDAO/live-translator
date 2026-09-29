@@ -5,6 +5,7 @@
 
 import { ZH, SIMPLIFIED_CLAUSE, isHanDominant, withoutHan } from './chinese.js'
 import { tokenize } from './english.js'
+import { detectOutputLanguage } from './en-vi.js'
 import type { LangTag, LanguagePack } from './types.js'
 import { VI, VI_LETTERS } from './vietnamese.js'
 
@@ -38,12 +39,14 @@ export function detectViZh(text: string): LangTag | null {
  *     not Chinese. Adding "Never respond in English." to the instruction did
  *     not change it, so the clause is not pinned.
  *   * Vietnamese speech, declared VI→ZH: correct Simplified Chinese.
- * Until Auto is fixed, a VI/ZH feed with Vietnamese speakers should declare
- * the direction.
+ * `detectOutput` drops the English translation, so Auto shows the Vietnamese
+ * caption untranslated rather than wrong; a VI/ZH feed with Vietnamese
+ * speakers should still declare the direction to get Chinese at all.
  */
 export const viZh: LanguagePack = {
   pair: [VI, ZH],
   names: { [VI]: 'Vietnamese', [ZH]: 'Chinese' },
   detect: detectViZh,
+  detectOutput: detectOutputLanguage,
   instructionClauses: ['Preserve Vietnamese diacritics exactly.', SIMPLIFIED_CLAUSE],
 }

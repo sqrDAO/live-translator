@@ -75,7 +75,12 @@ language pair needs a different one.
 | --- | --- | --- |
 | `@sqrdao/live-translate/lang/en-vi` | English ⇄ Vietnamese | the production pack |
 | `@sqrdao/live-translate/lang/en-zh` | English ⇄ Chinese | Mandarin speech, Simplified output (`'zh'`) |
-| `@sqrdao/live-translate/lang/vi-zh` | Vietnamese ⇄ Chinese | Mandarin speech, Simplified output (`'zh'`); **declare VI→ZH for Vietnamese speakers** — in Auto the model answers Vietnamese speech in English (probed 2026-09-29) |
+| `@sqrdao/live-translate/lang/vi-zh` | Vietnamese ⇄ Chinese | Mandarin speech, Simplified output (`'zh'`); **declare VI→ZH for Vietnamese speakers** — in Auto the model answers Vietnamese speech in English (probed 2026-09-29), and that translation is dropped |
+
+Each bundled pack also carries `detectOutput`, a translation classifier that
+knows all three bundled languages. A translation it places in any language but
+its session's target is dropped: a source-only host shows the speaker's words
+untranslated, and a host that needs a complete pair gets nothing.
 
 The engine still runs exactly two sessions, so a feed interprets one pair at a
 time; a host picks the pack per feed.

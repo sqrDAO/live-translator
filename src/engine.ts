@@ -277,6 +277,7 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
     this.coordinator = new TargetTurnCoordinator(IDLE_FINALIZE_MS, {
       pair: this.pair,
       detect: options.languages.detect,
+      ...(options.languages.detectOutput ? { detectOutput: options.languages.detectOutput } : {}),
       allowSourceOnly: options.allowSourceOnly ?? false,
       ...(options.forcedSourceLang ? { forcedSourceLang: options.forcedSourceLang } : {}),
       maxUtteranceSentences: MAX_UTTERANCE_SENTENCES,

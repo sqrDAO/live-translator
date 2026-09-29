@@ -45,6 +45,14 @@ export interface LanguagePack {
   readonly pair: LanguagePair
   readonly names: LanguageNames
   readonly detect: LanguageDetector
+  /**
+   * Classifies a *translation*, and unlike `detect` may answer a tag outside
+   * the pair. The merge drops a translation this places in any language but
+   * the one its session was told to write — the case `detect` cannot see,
+   * since it abstains on a language it does not know. `null` abstains and
+   * keeps the translation. Absent, no translation is checked this way.
+   */
+  readonly detectOutput?: LanguageDetector
   readonly instructionClauses?: readonly string[]
 }
 

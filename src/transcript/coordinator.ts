@@ -55,6 +55,7 @@ interface TurnState {
 export interface TargetTurnCoordinatorOptions {
   pair: LanguagePair
   detect: LanguageDetector
+  detectOutput?: LanguageDetector
   forcedSourceLang?: LangTag
   allowSourceOnly?: boolean
   /**
@@ -95,6 +96,7 @@ export class TargetTurnCoordinator {
     this.merger = new UtteranceMerger({
       pair: options.pair,
       detect: options.detect,
+      ...(options.detectOutput ? { detectOutput: options.detectOutput } : {}),
       allowSourceOnly: options.allowSourceOnly ?? false,
       ...(options.forcedSourceLang ? { forcedSourceLang: options.forcedSourceLang } : {}),
     })

@@ -251,6 +251,8 @@ export interface UtteranceMergerOptions {
   pair: LanguagePair
   /** Text classifier for the pair; `null` abstains. */
   detect: LanguageDetector
+  /** Translation classifier that may answer outside the pair; see `LanguagePack.detectOutput`. */
+  detectOutput?: LanguageDetector
   /** Fragments shorter than this are treated as phantom noise. */
   minCharacters?: number
   /** Permit recognized source text before translation; empty translated means pending/missing. */
@@ -351,7 +353,8 @@ export class UtteranceMerger {
     // transcript is the original that translation was made from, so the pair
     // is internally consistent. The source-target session's transcript is the
     // fallback for a degraded one-session feed.
-    const translating = byTarget.get(otherOf(this.pair, sourceLang))
+    const target = otherOf(this.pair, sourceLang)
+    const translating = byTarget.get(target)
     const sourceSession = byTarget.get(sourceLang)
     const original = collapse(translating?.original || sourceSession?.original || '')
 
@@ -361,13 +364,17 @@ export class UtteranceMerger {
     // where the second-language session answered second-language speech in
     // the first language. The veto below still rejects whatever ends up
     // selected if it reads wrong.
+    const offTarget = (text: string) => {
+      const lang = this.options.detectOutput?.(text) ?? null
+      return lang !== null && lang !== target
+    }
     let translated = collapse(translating?.translated ?? '')
-    if (!translated || this.detect(translated) === sourceLang) {
+    if (!translated || this.detect(translated) === sourceLang || offTarget(translated)) {
       const flipped =
         sourceSession && !isPassthrough(sourceSession.original, sourceSession.translated)
           ? collapse(sourceSession.translated)
           : ''
-      if (flipped && this.detect(flipped) !== sourceLang) translated = flipped
+      if (flipped && this.detect(flipped) !== sourceLang && !offTarget(flipped)) translated = flipped
     }
 
     // Hosts opt in because existing sinks expect a complete bilingual pair.
@@ -384,6 +391,17 @@ export class UtteranceMerger {
       return null
     }
     if (detectedTranslated && detectedTranslated === sourceLang) return null
+
+    // A translation in a language the session was never asked for — English
+    // from a zh-target session in a VI/ZH feed (probed 2026-09-29) — is
+    // dropped, not published: the speaker's words still stand, untranslated,
+    // where a source-only host shows them; a host that needs a complete pair
+    // gets nothing. It runs after the veto above so that an echo of the source
+    // keeps being rejected whole, as it always was.
+    if (translated && offTarget(translated)) {
+      translated = ''
+      if (!this.options.allowSourceOnly) return null
+    }
 
     const minCharacters = this.options.minCharacters ?? 2
     if (original.length < minCharacters) return null
