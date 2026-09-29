@@ -28,14 +28,17 @@
     <!-- Theme before first paint, so a light visitor never sees a dark flash.
          Same rule as src/theme.ts: a stored choice, else the OS setting. -->
     <script>
+      // Only the read is guarded: storage that refuses it (some private
+      // modes) means no stored choice, and the OS setting still decides.
+      var t = null
       try {
-        var t = localStorage.getItem('live-translate:theme')
-        if (t === 'light' || (t !== 'dark' && matchMedia('(prefers-color-scheme: light)').matches)) {
-          document.documentElement.dataset.theme = 'light'
-          // The light canvas; theme.ts re-reads it from the token once CSS loads.
-          document.querySelector('meta[name="theme-color"]').content = '#faf9f6'
-        }
+        t = localStorage.getItem('live-translate:theme')
       } catch (e) {}
+      if (t === 'light' || (t !== 'dark' && matchMedia('(prefers-color-scheme: light)').matches)) {
+        document.documentElement.dataset.theme = 'light'
+        // The light canvas; theme.ts re-reads it from the token once CSS loads.
+        document.querySelector('meta[name="theme-color"]').content = '#faf9f6'
+      }
     </script>
   </head>
   <body>
