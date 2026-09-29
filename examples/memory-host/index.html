@@ -67,8 +67,14 @@
         </div>
         <div class="meta">
           <button type="button" class="history-button" id="history-open">History</button>
-          <!-- Pressed means light. Icon-only, so it carries its own label. -->
-          <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Light theme" aria-pressed="false">
+          <!-- Cycles system → light/dark → system. Icon-only, so theme.ts
+               keeps its label naming the setting and the next step; the icon
+               shows the setting (half disc = follow the system). -->
+          <button type="button" class="theme-toggle" id="theme-toggle" data-choice="system" aria-label="Theme: system">
+            <svg class="icon-system" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2" />
+              <path fill="currentColor" d="M12 4a8 8 0 0 1 0 16Z" />
+            </svg>
             <svg class="icon-sun" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
               <circle cx="12" cy="12" r="4.5" fill="currentColor" />
               <path

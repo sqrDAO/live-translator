@@ -202,7 +202,7 @@ body {
   padding-top: 2px;
 }
 
-/* Icon-only chip: square, the glyph centred, showing the mode it switches to. */
+/* Icon-only chip: square, the glyph centred, showing the current setting. */
 .theme-toggle {
   display: grid;
   place-items: center;
@@ -211,12 +211,13 @@ body {
   color: var(--color-text-secondary);
 }
 
-.theme-toggle .icon-moon,
-.theme-toggle[aria-pressed='true'] .icon-sun {
+.theme-toggle svg {
   display: none;
 }
 
-.theme-toggle[aria-pressed='true'] .icon-moon {
+.theme-toggle[data-choice='system'] .icon-system,
+.theme-toggle[data-choice='light'] .icon-sun,
+.theme-toggle[data-choice='dark'] .icon-moon {
   display: block;
 }
 
