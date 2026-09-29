@@ -10,8 +10,7 @@
  * copy the file over this one below the header — do not edit it here.
  */
 
-
-/* sqrDAO v1.2.2 */
+/* sqrDAO v1.3.0 */
 :root {
   --color-background: #0A0A0A;
   --color-surface: #1A1A1A;
@@ -20,7 +19,8 @@
   --color-text-primary: #FFFFFF;
   --color-text-secondary: #B3B3B3;
   --color-accent: #FFC700;
-  --color-accent-text: #181818;
+  --color-on-accent: #181818;
+  --color-gold-ink: #FFC700;
   --color-accent-hover: #e6b800;
   --color-black: #000000;
   --color-white: #FFFFFF;
@@ -94,7 +94,15 @@
   --color-text-primary: #181818;
   --color-text-secondary: #5C574C;
   --color-accent: #FFC700;
-  --color-accent-text: #7A5E00;
+  --color-on-accent: #181818;
+  --color-gold-ink: #7A5E00;
   --color-accent-hover: #E0B400;
   --color-accent-tint: #FFEDAD;
+  --component-card-background: #FFFFFF;
+  --component-card-border: 1px solid #E4E0D6;
+  --component-tooltip-background: #FFFFFF;
+  --component-tooltip-border: 1px solid #E4E0D6;
+  --component-chip-background: #FAF9F6;
+  --component-chip-border: 1px solid #E4E0D6;
+  --component-focus-outline: 2px solid #7A5E00;
 }

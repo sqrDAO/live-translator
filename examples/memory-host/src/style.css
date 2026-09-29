@@ -14,17 +14,9 @@
      down from secondary text toward the page so it tracks both modes. */
   --ink-faint: color-mix(in srgb, var(--color-text-secondary) 62%, var(--color-background));
 
-  /* A label sitting ON a gold fill is dark in both modes. It cannot alias
-     --color-accent-text, because that token carries two different roles: the
-     label-on-accent colour in dark (#181818) and gold-text-on-light in light
-     (#7A5E00). Held at the dark-mode value on purpose. */
-  --on-accent: #181818;
-
-  /* Gold *text*, which is not the same token in both modes. DESIGN.md's key
-     rule: gold is fill-only on light, where it runs ~1.5:1, so gold labels and
-     links there use the darkened #7A5E00. Both halves already exist as tokens
-     — they just sit under names that swap roles between modes. */
-  --gold-ink: var(--color-accent);
+  /* Ink ON a gold fill is --color-on-accent; gold TEXT on the page is
+     --color-gold-ink, which darkens in light mode. sqrDES v1.3.0 split the old
+     --color-accent-text into these two roles, so neither is shimmed here. */
 
   /* Guideline track is pure black, which only holds on the dark canvas. */
   --track: var(--color-black);
@@ -48,7 +40,6 @@
 }
 
 [data-theme='light'] {
-  --gold-ink: var(--color-accent-text);
   --track: var(--color-surface-alt);
 }
 
@@ -74,10 +65,8 @@ body {
 }
 
 :focus-visible {
-  /* Not --component-focus-outline: that alias is frozen at gold for both
-     modes, and gold is ~1.5:1 on the light canvas. --gold-ink keeps the
-     guideline's #FFC700 on dark and darkens it where it has to be seen. */
-  outline: 2px solid var(--gold-ink);
+  /* Gold on dark, gold-ink on light: gold alone is ~1.5:1 on the light canvas. */
+  outline: var(--component-focus-outline);
   outline-offset: var(--component-focus-outline-offset);
 }
 
@@ -89,7 +78,7 @@ body {
   z-index: 1300;
   transform: translateY(-200%);
   background: var(--color-accent);
-  color: var(--on-accent);
+  color: var(--color-on-accent);
   font-weight: var(--component-button-font-weight);
   padding: var(--spacing-sm) var(--spacing-md);
   border-radius: var(--component-button-radius);
@@ -144,7 +133,7 @@ body {
   font-size: var(--font-label-font-size);
   letter-spacing: var(--font-label-letter-spacing);
   text-transform: var(--font-label-text-transform);
-  color: var(--gold-ink);
+  color: var(--color-gold-ink);
   opacity: 0.85;
 }
 
@@ -194,36 +183,67 @@ body {
 .wordmark em {
   font-style: italic;
   font-weight: 500;
-  color: var(--gold-ink);
+  color: var(--color-gold-ink);
 }
 
 .meta {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
   gap: var(--spacing-sm);
   padding-top: 2px;
 }
 
-/* Chip: 4px radius, surface fill, hairline border. A select, so the pair
-   can be changed where it is shown. */
-.pair {
+/* The status line sits under the two chips, on its own row. */
+.meta .status {
+  flex-basis: 100%;
+  justify-content: flex-end;
+}
+
+/* A caret for the selects that drop their native chrome — without one a
+   picker reads as a label. Two gradient triangles, so it takes the text
+   colour from the tokens instead of a hex baked into an SVG. */
+.pair,
+.mic-select {
+  --caret: var(--color-text-secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--caret) 50%),
+    linear-gradient(135deg, var(--caret) 50%, transparent 50%);
+  background-size: 4px 4px;
+  background-position:
+    calc(100% - 13px) 50%,
+    calc(100% - 9px) 50%;
+  background-repeat: no-repeat;
+}
+
+/* Chip: 4px radius, the component chip fill and border. A select, so the
+   pair can be changed where it is shown. */
+.pair,
+.top .history-button {
   appearance: none;
   font-family: var(--font-label-font-family);
   font-weight: var(--font-label-font-weight);
   font-size: 0.6rem;
   letter-spacing: var(--font-label-letter-spacing);
+  text-transform: uppercase;
   color: var(--color-text-primary);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background-color: var(--component-chip-background);
+  border: var(--component-chip-border);
   border-radius: 4px;
   padding: 5px var(--spacing-sm);
   white-space: nowrap;
+  line-height: 1.5;
   cursor: pointer;
   transition: var(--component-button-transition);
 }
 
-.pair:hover {
+.pair {
+  padding-right: 22px;
+}
+
+.pair:hover,
+.top .history-button:hover:not(:disabled) {
   border-color: var(--color-text-secondary);
 }
 
@@ -300,8 +320,8 @@ body {
   margin-top: var(--spacing-sm);
 }
 
-/* Card: #1A1A1A on a #222 border at 16px, flat at rest — the system is
-   flat-first and introduces elevation only on hover. */
+/* Card: the component card surface and hairline at 16px, flat at rest — the
+   system is flat-first and introduces elevation only on hover. */
 /* `flex-shrink: 0`: the feed is a scrolling flex column, and `overflow:
    hidden` drops a card's minimum height to zero, so without it a full feed
    squashed every card to fit and clipped the text — the translation line
@@ -310,8 +330,8 @@ body {
   position: relative;
   flex-shrink: 0;
   overflow: hidden;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--component-card-background);
+  border: var(--component-card-border);
   border-radius: var(--component-card-radius);
   padding: var(--spacing-md);
   box-shadow: none;
@@ -363,7 +383,7 @@ body {
   font-size: 0.6rem;
   letter-spacing: var(--font-label-letter-spacing);
   text-transform: uppercase;
-  color: var(--gold-ink);
+  color: var(--color-gold-ink);
   opacity: 0.85;
 }
 
@@ -390,7 +410,7 @@ body {
 
 .utt:not(.final) .translated::after {
   content: '▏';
-  color: var(--gold-ink);
+  color: var(--color-gold-ink);
   animation: caret 0.8s steps(1) infinite;
 }
 
@@ -437,7 +457,7 @@ body {
   border-radius: 50%;
   border: 1px solid var(--color-accent);
   background: var(--color-accent);
-  color: var(--on-accent);
+  color: var(--color-on-accent);
   cursor: pointer;
   display: grid;
   place-items: center;
@@ -500,20 +520,20 @@ body {
 /* Selected reads as the system's primary button: gold fill, dark label. */
 .direction button[aria-pressed='true'] {
   background: var(--color-accent);
-  color: var(--on-accent);
+  color: var(--color-on-accent);
 }
 
 .mic-select {
   justify-self: start;
   max-width: 200px;
   appearance: none;
-  background: var(--color-surface);
+  background-color: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--component-button-radius);
   color: var(--color-text-secondary);
   font-family: var(--font-body-font-family);
   font-size: 0.72rem;
-  padding: 8px 10px;
+  padding: 8px 24px 8px 10px;
   cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -527,6 +547,16 @@ body {
 }
 
 @media (max-width: 460px) {
+  /* No room for the chips beside the title: stack them, at one width. */
+  .meta {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .top .history-button {
+    text-align: left;
+  }
+
   .direction button {
     padding: 7px 6px;
     letter-spacing: 0;
@@ -609,45 +639,197 @@ body {
   display: none !important;
 }
 
-.history-button,
-#history-session {
-  padding: 8px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--component-button-radius);
-  background: var(--color-surface);
-  color: var(--color-text-primary);
-  font: inherit;
-  cursor: pointer;
-}
-.history-button:disabled { opacity: 0.45; cursor: default; }
+/* ── history dialog ─────────────────────────────────────────────────────────
+   A modal: card surface at the 16px modal radius, lifted with the system's
+   float shadow — the one place off the feed that is allowed elevation at rest. */
 #history-dialog {
   margin: auto;
-  width: min(680px, calc(100vw - 32px));
+  width: min(680px, calc(100vw - 2 * var(--spacing-md)));
   max-height: 85dvh;
-  padding: var(--spacing-md);
-  border: 1px solid var(--color-border);
-  border-radius: var(--component-button-radius);
-  background: var(--color-background);
+  padding: var(--spacing-lg);
+  background: var(--component-card-background);
+  border: var(--component-card-border);
+  border-radius: var(--component-card-radius);
+  box-shadow: var(--component-tooltip-shadow);
   color: var(--color-text-primary);
   overflow: auto;
+  animation: fadeDown 0.35s ease-out both;
 }
-#history-dialog::backdrop { background: rgb(0 0 0 / 65%); }
-.history-heading, .history-actions { display: flex; gap: 12px; justify-content: space-between; margin-bottom: 16px; }
-#history-dialog p { color: var(--color-text-secondary); margin-bottom: 16px; }
-#history-dialog label { display: block; }
-#history-session { width: 100%; margin: 8px 0 16px; }
-#history-transcript { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+
+#history-dialog::backdrop {
+  background: color-mix(in srgb, var(--color-black) 65%, transparent);
+}
 
 /* Also usable as a non-modal panel on browsers without native dialog support. */
-#history-dialog:not([open]) { display: none; }
+#history-dialog:not([open]) {
+  display: none;
+}
+
 #history-dialog[open] {
   position: fixed;
   inset: 0;
   height: fit-content;
-  z-index: 1200;
+  z-index: 1300;
 }
+
+.history-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
+}
+
+#history-title {
+  font-family: var(--font-heading-font-family);
+  font-weight: var(--font-heading-font-weight);
+  font-size: 1.25rem;
+  line-height: 1.2;
+}
+
+#history-dialog p {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--spacing-md);
+}
+
+/* The field label is a section label: mono, uppercase, gold ink. */
+#history-dialog label {
+  display: block;
+  font-family: var(--font-label-font-family);
+  font-weight: var(--font-label-font-weight);
+  font-size: 0.62rem;
+  letter-spacing: var(--font-label-letter-spacing);
+  text-transform: var(--font-label-text-transform);
+  color: var(--color-gold-ink);
+  opacity: 0.85;
+}
+
 #history-dialog #history-error {
   color: var(--color-text-primary);
   border-left: 3px solid var(--warn-fill);
-  padding-left: 12px;
+  padding-left: var(--spacing-sm);
+}
+
+/* Input: 8px radius on the page canvas, so it reads as a well in the card. */
+#history-session {
+  display: block;
+  width: 100%;
+  margin: var(--spacing-sm) 0 var(--spacing-md);
+  padding: var(--spacing-sm) 12px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: var(--component-button-radius);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: var(--component-button-transition);
+}
+
+#history-session:hover {
+  border-color: var(--color-text-secondary);
+}
+
+.history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+/* Secondary / outlined button: gold hairline, gold-ink label, filling gold on
+   hover. The chip-sized header button overrides this above. */
+.history-button {
+  appearance: none;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: transparent;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--component-button-radius);
+  color: var(--color-gold-ink);
+  font-family: var(--font-body-font-family);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--component-button-transition);
+}
+
+.history-button:hover:not(:disabled) {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+/* Primary: the one action the dialog is for. */
+#history-download {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-weight: var(--component-button-font-weight);
+}
+
+#history-download:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+/* Destructive: error hairline and text, pushed to the far end of the row. */
+#history-delete {
+  margin-left: auto;
+  border-color: var(--rec-fill);
+  color: var(--rec-glow);
+}
+
+#history-delete:hover:not(:disabled) {
+  background: var(--rec-fill);
+  color: var(--color-white);
+}
+
+/* Close is a way out, not an action: neutral hairline, secondary ink. */
+#history-close {
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+#history-close:hover {
+  background: transparent;
+  border-color: var(--color-text-secondary);
+  color: var(--color-text-primary);
+}
+
+/* Guideline disabled state: 0.38, not-allowed, no hover. */
+.history-button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+/* The transcript is plain text in a well, scrolling on its own so the actions
+   above stay put. */
+#history-transcript {
+  max-height: 45dvh;
+  overflow: auto;
+  padding: var(--spacing-md);
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: var(--component-button-radius);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 0.875rem;
+  line-height: var(--font-body-line-height);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+#history-transcript:empty {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #history-dialog {
+    animation: none;
+  }
+
+  .pair,
+  .history-button,
+  #history-session {
+    transition: none;
+  }
 }
