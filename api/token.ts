@@ -13,6 +13,7 @@
  * question does not arise.
  */
 
+import { authorize, type Authorization } from './_auth.js'
 import { enVi } from '../src/lang/en-vi.js'
 import { enZh } from '../src/lang/en-zh.js'
 import type { LangTag, LanguagePack } from '../src/lang/types.js'
@@ -74,12 +75,21 @@ function oneOf(pack: LanguagePack): string {
 export async function handleTokenRequest(input: {
   method: string | undefined
   body: unknown
+  /** Who is asking, decided by `authorize` before any of this runs. */
+  authorization: Authorization
   apiKey: string | undefined
   model: string | undefined
   mint?: Mint
 }): Promise<TokenEndpointResult> {
   if (input.method !== 'POST') {
     return { status: 405, body: { error: 'method not allowed' } }
+  }
+
+  // Each mint spends the deployment's Gemini quota, so it is the thing the
+  // sign-in protects: hiding the page alone would leave this callable by anyone
+  // who has the URL.
+  if (!input.authorization.ok) {
+    return { status: input.authorization.status, body: { error: input.authorization.error } }
   }
 
   const body = parseBody(input.body)
@@ -143,6 +153,7 @@ export async function handleTokenRequest(input: {
 interface ServerlessRequest {
   method?: string | undefined
   body?: unknown
+  headers?: Record<string, string | string[] | undefined>
 }
 
 interface ServerlessResponse {
@@ -151,9 +162,15 @@ interface ServerlessResponse {
 }
 
 export default async function handler(req: ServerlessRequest, res: ServerlessResponse): Promise<void> {
+  const header = req.headers?.['authorization']
   const result = await handleTokenRequest({
     method: req.method,
     body: req.body,
+    authorization: await authorize(
+      // Never the development bypass on a deployment.
+      { authorization: Array.isArray(header) ? header[0] : header, host: null, developmentEnvironment: false },
+      process.env,
+    ),
     apiKey: process.env.GEMINI_API_KEY,
     model: process.env.GEMINI_LIVE_MODEL,
   })

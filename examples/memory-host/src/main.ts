@@ -14,6 +14,7 @@ import { enVi } from '@sqrdao/live-translate/lang/en-vi'
 import { enZh } from '@sqrdao/live-translate/lang/en-zh'
 import { viZh } from '@sqrdao/live-translate/lang/vi-zh'
 
+import { decide, idToken, listRequests, recheck, signIn, signOut, watchAuth, type AccessRequest, type AuthState } from './auth'
 import { MemorySink, type StoredUtterance } from './memory-sink'
 import { bindThemeToggle } from './theme'
 import { TranscriptHistory, TranscriptArchive, TRANSCRIPT_PREFIX, TRANSCRIPT_DELETE_PREFIX, transcriptText, type TranscriptRecorder, type TranscriptSession } from './transcript-history'
@@ -60,9 +61,12 @@ let speakerLang: LangTag | null = null
  * host's own endpoint; the API key never reaches this code.
  */
 const mintToken: MintToken = async (target): Promise<TokenGrant> => {
+  // Fetched per mint: Firebase refreshes it near its one-hour expiry, so a
+  // reconnect late in a long feed still presents a current one.
+  const bearer = await idToken()
   const response = await fetch('/api/token', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
     // The declared direction travels with every mint, including the ones the
     // engine makes on reconnect: the session prompt is pinned into the token,
     // so a reconnect that forgot it would silently return that half of the
@@ -70,6 +74,12 @@ const mintToken: MintToken = async (target): Promise<TokenGrant> => {
     body: JSON.stringify({ pair: pairId, target, ...(speakerLang ? { speakerLang } : {}) }),
   })
   if (!response.ok) {
+    // Signed out elsewhere, or access withdrawn since sign-in: no reconnect
+    // will succeed, so send the person back to the gate rather than leaving a
+    // dead feed that reads "mất kết nối".
+    if (response.status === 401 || response.status === 403) {
+      void recheck().then(showAuth, showAuthError)
+    }
     const detail = await response.text().catch(() => '')
     throw new Error(`token endpoint HTTP ${response.status} ${detail}`.trim())
   }
@@ -584,3 +594,176 @@ function restartIfRunning(): void {
 pairSel.value = pairId
 buildDirectionButtons()
 renderDirection()
+
+// --- Sign-in -----------------------------------------------------------------
+// The server is the gate (`/api/token` mints for approved callers only); this
+// decides which screen to show. First sign-in files an access request, which
+// an admin approves in the Firebase console.
+const gateVi = $('#gate-vi')
+const gateEn = $('#gate-en')
+const gateError = $('#gate-error')
+const signInBtn = $<HTMLButtonElement>('#gate-signin')
+const recheckBtn = $<HTMLButtonElement>('#gate-recheck')
+const switchBtn = $<HTMLButtonElement>('#gate-switch')
+const accountEl = $('#account')
+const accountEmail = $('#account-email')
+const signOutBtn = $<HTMLButtonElement>('#signout')
+
+function showGateError(message: string | null): void {
+  gateError.textContent = message ?? ''
+  gateError.hidden = !message
+}
+
+function showAuthError(error: unknown): void {
+  showGateError(error instanceof Error ? error.message : String(error))
+}
+
+/** The gate's wording per state: Vietnamese first, English beneath, as elsewhere. */
+const GATE_TEXT = {
+  out: ['Đăng nhập để sử dụng', 'approved accounts only'],
+  waiting: ['Đang chờ duyệt', 'access requested · an admin will approve it'],
+  denied: ['Không có quyền truy cập', 'access was not approved'],
+} as const
+
+function showAuth(state: AuthState): void {
+  showGateError(null)
+  if (state.kind === 'signed-in' && state.access === 'approved') {
+    document.body.dataset.auth = 'in'
+    accountEmail.textContent = state.dev ? `${state.email} · development, no sign-in` : state.email
+    // The development user has no session to end.
+    signOutBtn.hidden = Boolean(state.dev)
+    requestsOpenBtn.hidden = !state.admin
+    accountEl.hidden = false
+    if (state.admin) void refreshRequests()
+    return
+  }
+  if (requestsDialog.open) requestsDialog.close()
+  if (running) void stop()
+  accountEl.hidden = true
+  const gate = state.kind === 'signed-out' ? 'out' : state.access === 'denied' ? 'denied' : 'waiting'
+  document.body.dataset.auth = gate
+  gateVi.textContent = GATE_TEXT[gate][0]
+  gateEn.textContent = state.kind === 'signed-in' ? `${state.email} · ${GATE_TEXT[gate][1]}` : GATE_TEXT[gate][1]
+  signInBtn.hidden = gate !== 'out'
+  recheckBtn.hidden = gate !== 'waiting'
+  switchBtn.hidden = gate === 'out'
+}
+
+signInBtn.addEventListener('click', () => {
+  showGateError(null)
+  // The resulting state arrives through `watchAuth`.
+  signIn().catch((error: unknown) => {
+    // Closing the popup is a change of mind, not a failure.
+    if ((error as { code?: string }).code === 'auth/popup-closed-by-user') return
+    showAuthError(error)
+  })
+})
+
+recheckBtn.addEventListener('click', () => {
+  recheckBtn.disabled = true
+  recheck()
+    .then(showAuth, showAuthError)
+    .finally(() => (recheckBtn.disabled = false))
+})
+
+for (const button of [switchBtn, signOutBtn]) {
+  button.addEventListener('click', () => {
+    void stop()
+      .then(signOut)
+      .catch(showAuthError)
+  })
+}
+
+// --- Access requests (admins) -------------------------------------------------
+// Shown only to admins, but not trusted to them: `/api/requests` and the
+// Firestore rules refuse everyone else whatever this page does.
+const requestsOpenBtn = $<HTMLButtonElement>('#requests-open')
+const requestsDialog = $<HTMLDialogElement>('#requests-dialog')
+const requestsList = $('#requests-list')
+const requestsError = $('#requests-error')
+let requests: AccessRequest[] = []
+
+function showRequestsError(message: string | null): void {
+  requestsError.textContent = message ?? ''
+  requestsError.hidden = !message
+}
+
+const STATUS_TEXT: Record<AccessRequest['status'], string> = {
+  pending: 'chờ duyệt · pending',
+  approved: 'đã duyệt · approved',
+  denied: 'từ chối · denied',
+}
+
+function when(iso: string | null): string {
+  return iso ? new Date(iso).toLocaleString() : ''
+}
+
+function renderRequests(): void {
+  const pending = requests.filter((r) => r.status === 'pending').length
+  requestsOpenBtn.textContent = pending ? `Requests (${pending})` : 'Requests'
+  // Pending first, newest first within each group (the server sends newest first).
+  const ordered = [...requests].sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending'))
+  if (!ordered.length) {
+    const li = document.createElement('li')
+    li.innerHTML = '<p class="requests-empty">No requests yet.</p>'
+    requestsList.replaceChildren(li)
+    return
+  }
+  requestsList.replaceChildren(
+    ...ordered.map((r) => {
+      const li = document.createElement('li')
+      li.className = 'request'
+      li.dataset.status = r.status
+      li.dataset.uid = r.uid
+      li.innerHTML =
+        '<div class="request-who"><strong></strong><p class="request-meta"></p></div>' +
+        '<div class="request-actions">' +
+        '<button type="button" class="history-button approve" data-decide="approved">Approve</button>' +
+        '<button type="button" class="history-button" data-decide="denied">Deny</button></div>'
+      li.querySelector('strong')!.textContent = r.name ? `${r.name} · ${r.email ?? r.uid}` : (r.email ?? r.uid)
+      const decided = r.decidedBy ? ` · ${r.decidedBy}, ${when(r.decidedAt)}` : ''
+      li.querySelector('.request-meta')!.textContent = `${STATUS_TEXT[r.status]} · asked ${when(r.requestedAt)}${decided}`
+      // A decided row keeps only the action that would reverse it.
+      for (const button of li.querySelectorAll<HTMLButtonElement>('button[data-decide]')) {
+        button.hidden = button.dataset.decide === r.status
+      }
+      return li
+    }),
+  )
+}
+
+async function refreshRequests(): Promise<void> {
+  try {
+    requests = await listRequests()
+    showRequestsError(null)
+    renderRequests()
+  } catch (error) {
+    showRequestsError(`Could not load requests: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+requestsOpenBtn.addEventListener('click', () => {
+  requestsDialog.showModal()
+  void refreshRequests()
+})
+$('#requests-close').addEventListener('click', () => requestsDialog.close())
+
+requestsList.addEventListener('click', (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-decide]')
+  const uid = button?.closest<HTMLElement>('.request')?.dataset.uid
+  if (!button || !uid) return
+  const status = button.dataset.decide as AccessRequest['status']
+  for (const b of requestsList.querySelectorAll<HTMLButtonElement>(`[data-uid="${CSS.escape(uid)}"] button`)) b.disabled = true
+  decide(uid, status)
+    .then(refreshRequests)
+    .catch((error: unknown) => {
+      showRequestsError(`Could not save that decision: ${error instanceof Error ? error.message : String(error)}`)
+      renderRequests()
+    })
+})
+
+watchAuth(showAuth, showAuthError).catch((error: unknown) => {
+  document.body.dataset.auth = 'out'
+  signInBtn.hidden = true
+  showAuthError(error)
+})

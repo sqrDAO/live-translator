@@ -18,7 +18,12 @@ function stubMint(grant?: Partial<SessionTokenGrant>) {
   return { mint, calls }
 }
 
-const ok = { method: 'POST', apiKey: 'secret-key', model: 'gemini-live' }
+const ok = {
+  method: 'POST',
+  apiKey: 'secret-key',
+  model: 'gemini-live',
+  authorization: { ok: true, email: 'ana@example.com' },
+} as const
 
 describe('api/token — the deployed mint endpoint', () => {
   it('returns the token and the pinned sessionConfig the engine expects', async () => {
@@ -53,6 +58,26 @@ describe('api/token — the deployed mint endpoint', () => {
     for (const body of [{ target: 'fr' }, { target: undefined }, null, 'not json']) {
       expect((await handleTokenRequest({ ...ok, body, mint })).status).toBe(400)
     }
+    expect(calls).toHaveLength(0)
+  })
+
+  it('mints nothing for a caller who is not signed in or not approved', async () => {
+    const { mint, calls } = stubMint()
+    const anonymous = await handleTokenRequest({
+      ...ok,
+      authorization: { ok: false, status: 401, error: 'sign in required' },
+      body: { target: 'en' },
+      mint,
+    })
+    const removed = await handleTokenRequest({
+      ...ok,
+      authorization: { ok: false, status: 403, error: 'not approved' },
+      body: { target: 'en' },
+      mint,
+    })
+
+    expect(anonymous).toEqual({ status: 401, body: { error: 'sign in required' } })
+    expect(removed).toEqual({ status: 403, body: { error: 'not approved' } })
     expect(calls).toHaveLength(0)
   })
 

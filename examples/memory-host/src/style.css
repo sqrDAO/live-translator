@@ -469,6 +469,99 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* Who is signed in, and the way out. Quiet: it is account chrome, not part
+   of the feed. */
+.account {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: var(--spacing-sm);
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  padding-bottom: var(--spacing-xs);
+  overflow-wrap: anywhere;
+}
+
+.link-button {
+  appearance: none;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--color-gold-ink);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* ── sign-in gate ───────────────────────────────────────────────────────────
+   The stage is shown only once the server says who is signed in; until then
+   the page is either this gate or blank (`pending`), never a working-looking
+   app whose mic would only fail at mint. */
+body:not([data-auth='in']) .stage {
+  display: none;
+}
+
+.gate {
+  display: none;
+  min-height: 100dvh;
+  max-width: 420px;
+  margin: 0 auto;
+  padding: var(--spacing-lg) var(--spacing-md);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  animation: fadeDown 0.6s ease-out both;
+}
+
+body:not([data-auth='in']):not([data-auth='pending']) .gate {
+  display: flex;
+}
+
+.gate .wordmark {
+  margin-bottom: var(--spacing-lg);
+}
+
+.gate-vi {
+  font-size: 1.35rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.gate-en {
+  font-size: 0.62rem;
+  margin-top: var(--spacing-sm);
+}
+
+.gate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-lg);
+}
+
+/* Two classes: `.history-button` is declared later and would win a tie. */
+.gate-actions .gate-primary {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.gate-actions [hidden] {
+  display: none;
+}
+
+.gate-error {
+  margin-top: var(--spacing-md);
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+  border-left: 3px solid var(--warn-fill);
+  padding-left: var(--spacing-sm);
+  text-align: left;
+}
+
 .controls {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -676,7 +769,8 @@ body {
 /* ── history dialog ─────────────────────────────────────────────────────────
    A modal: card surface at the 16px modal radius, lifted with the system's
    float shadow — the one place off the feed that is allowed elevation at rest. */
-#history-dialog {
+#history-dialog,
+#requests-dialog {
   margin: auto;
   width: min(680px, calc(100vw - 2 * var(--spacing-md)));
   max-height: 85dvh;
@@ -690,16 +784,19 @@ body {
   animation: fadeDown 0.35s ease-out both;
 }
 
-#history-dialog::backdrop {
+#history-dialog::backdrop,
+#requests-dialog::backdrop {
   background: color-mix(in srgb, var(--color-black) 65%, transparent);
 }
 
 /* Also usable as a non-modal panel on browsers without native dialog support. */
-#history-dialog:not([open]) {
+#history-dialog:not([open]),
+#requests-dialog:not([open]) {
   display: none;
 }
 
-#history-dialog[open] {
+#history-dialog[open],
+#requests-dialog[open] {
   position: fixed;
   inset: 0;
   height: fit-content;
@@ -714,14 +811,16 @@ body {
   margin-bottom: var(--spacing-sm);
 }
 
-#history-title {
+#history-title,
+#requests-title {
   font-family: var(--font-heading-font-family);
   font-weight: var(--font-heading-font-weight);
   font-size: 1.25rem;
   line-height: 1.2;
 }
 
-#history-dialog p {
+#history-dialog p,
+#requests-dialog p {
   font-size: 0.875rem;
   color: var(--color-text-secondary);
   margin-bottom: var(--spacing-md);
@@ -857,7 +956,8 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #history-dialog {
+  #history-dialog,
+#requests-dialog {
     animation: none;
   }
 
@@ -866,5 +966,72 @@ body {
   .history-button,
   #history-session {
     transition: none;
+  }
+}
+
+/* ── access requests (admins) ───────────────────────────────────────────────
+   One row per person: who, when, where they stand, and the two decisions.
+   Pending rows lead; a decided row keeps its other action so a mistake can be
+   reversed from the same place. */
+.requests-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.request {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--spacing-xs) var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--component-button-radius);
+}
+
+.request[data-status='pending'] {
+  border-color: var(--color-accent);
+}
+
+.request-who {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+}
+
+.request-who strong {
+  display: block;
+  font-weight: 600;
+}
+
+#requests-dialog .request-meta {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+}
+
+.request-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.request-actions .history-button {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 0.78rem;
+}
+
+.request-actions .approve {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+#requests-dialog .requests-empty {
+  text-align: center;
+}
+
+@media (max-width: 460px) {
+  .request {
+    grid-template-columns: 1fr;
   }
 }

@@ -1,8 +1,8 @@
 # memory-host — reference host for `@sqrdao/live-translate`
 
 The smallest real host: an **in-memory `CaptionSink`** and a page that captures,
-translates, renders, and saves text transcripts in browser storage. No database,
-auth, or cloud storage — the
+translates, renders, and saves text transcripts in browser storage, behind a
+Firebase sign-in limited to approved accounts. No database or cloud storage — the
 proof that the engine's boundary is real, and the thing a new project starts
 from.
 
@@ -33,6 +33,54 @@ With no key configured the token endpoint returns a **localhost-only stub**
 (gated on a development flag *and* a loopback host) so the UI runs without Gemini
 credentials — the socket will not actually translate, but nothing leaks a key.
 
+## Sign-in
+
+Only approved people can use a deployment. Access is self-serve:
+
+1. Someone opens the page and signs in with Google (Firebase Auth).
+2. Their first sign-in files `users/{uid}` in Firestore with `status: "pending"`,
+   their email and name. The page says it is waiting for approval.
+3. An admin opens **Requests** (in the footer, beside Sign out — admins only;
+   the label carries the pending count) and presses **Approve** or **Deny**.
+   The person presses **Check again**, or reloads, and is in. Each decision
+   records who made it and when; a decided request can be reversed from the
+   same list.
+
+**Admins** are the emails in the Firestore document `config/admins`
+(`emails`, an array of lowercased addresses), currently
+`longpham91@gmail.com` and `leo@sqrdao.com`. Add or remove one by editing that
+document in the Firebase console — no deploy. Admins can always use the app,
+with no request of their own to approve.
+
+The token endpoint verifies the Firebase ID token and re-reads the record on
+every mint, so approving or withdrawing access takes effect at the person's
+next mint — no redeploy. Any status other than exactly `approved` withholds
+access. A denied person cannot file again; deleting their record in the
+console is the only way to let them.
+
+The server reads Firestore *as the caller*, with their own ID token, so
+[`firestore.rules`](../../firestore.rules) is what prevents self-approval: a
+person may create their own record as `pending` and read it, never change it;
+only an email on the admin list (with a verified address) may list or decide
+requests, and the rules hold its `decidedBy` to the admin's own email and
+`decidedAt` to the server's clock.
+Deploy rule changes with `firebase deploy --only firestore:rules`. The server
+holds no service-account key.
+
+Settings, all required on a deployment (see `.env.example`):
+`FIREBASE_PROJECT_ID`, `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`,
+`FIREBASE_APP_ID` — the web app's public config. In the Firebase console,
+Google must be enabled under Authentication → Sign-in method, and every
+domain the page is served from listed under Authentication → Settings →
+Authorized domains (`localhost` is there by default).
+
+Locally, leave `FIREBASE_PROJECT_ID` unset with `APP_ENV=development` and you
+are signed in as `dev@localhost` (loopback hosts only, the same gate as the
+stub token). Set the four values to test the real flow.
+
+The logic lives in [`api/_auth.ts`](../../api/_auth.ts), shared by the Vercel
+functions and `server.ts`.
+
 ## Transcript history
 
 Each microphone run automatically records the original text and translation,
@@ -62,7 +110,7 @@ and no saved sessions are automatically evicted.
 ## What to read
 
 - [`src/memory-sink.ts`](./src/memory-sink.ts) — the whole host contract, implemented in ~50 lines. `authorityValid()` / `adoptRenewal()` are where a real host consults a lease.
-- [`server.ts`](./server.ts) — the token endpoint: key in, token out, never the key.
+- [`server.ts`](./server.ts) — the token endpoint: key in, token out, never the key, and only for a signed-in, approved caller.
 - [`src/main.ts`](./src/main.ts) — constructing the engine, the `mintToken` hook, rendering.
 
 ## Test it, with no key
