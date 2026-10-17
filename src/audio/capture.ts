@@ -125,6 +125,17 @@ export class AudioCapture {
    * anything - including `getUserMedia` - before construction loses the gesture
    * and yields a permanently suspended context that produces silence with no
    * error.
+   *
+   * The context deliberately runs at the browser's own rate (48 kHz on every
+   * Mac Chrome mic tried, 2026-10-17); `StreamingResampler` band-limits it to
+   * 16 kHz. Forcing `{ sampleRate: 16000 }` here, as the reference app did,
+   * was tried in PR #16 and backed out: on two real speech clips (one played
+   * through a speaker, one a broadcast mic) the 16 kHz outputs correlated at
+   * 0.9997 and model runs agreed 97–99% either way, while the forced rate
+   * added risk: Firefox refuses a mic whose rate differs from the context's
+   * (NotSupportedError), Safari accepts the rate and may silently garble
+   * cross-rate MediaStreamSource audio, and a recovery path needs a new
+   * context outside the gesture.
    */
   unlockSync(): AudioContext {
     if (!this.context || this.context.state === 'closed') {

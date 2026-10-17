@@ -46,65 +46,276 @@ export function pcm16ToBase64(pcm: Int16Array): string {
 }
 
 /**
- * Streaming linear resampler.
+ * Filter cutoff (the −6 dB point) as a fraction of the lower of the two
+ * rates: 0.45 × 16 kHz = 7.2 kHz. Speech intelligibility lives below ~7 kHz;
+ * the 0.8 kHz up to the 8 kHz Nyquist is the transition band.
+ */
+const RESAMPLER_CUTOFF_RATIO = 0.45
+
+/**
+ * Sinc zero crossings on each side of the kernel. This, not a tap count, is
+ * what fixes the transition width relative to the cutoff, so every input rate
+ * gets the same response: 24 crossings is 80 input samples per side at
+ * 48 kHz (160 taps), 74 at 44.1 kHz, 40 at 24 kHz.
  *
- * The browser decides the AudioContext sample rate (44.1 kHz, 48 kHz, and on
- * some iOS devices 24 kHz). It is never 16 kHz, so every capture path resamples.
+ * Cost: 160 multiply-adds per 16 kHz output, ~2.6 M a second. Measured
+ * 2026-10-17 in Node 24 on an Intel i5-8257U under load (load average ~30):
+ * ~8 ms per second of 48 kHz audio fed in 128-frame blocks, i.e. ~0.02 ms
+ * per 2.7 ms callback, under 1% of one core.
+ */
+const RESAMPLER_ZERO_CROSSINGS = 24
+
+/**
+ * Kaiser window shape: β = 8 puts the stopband ≥ 80 dB down. The measured
+ * response is pinned in test/audio.test.ts.
+ */
+const RESAMPLER_KAISER_BETA = 8
+
+/**
+ * Most fractional phases a resampler precomputes. Real rate pairs need few
+ * (48k→16k: 1, 24k→16k: 2, 44.1k→16k: 160); a pathological pair such as
+ * 44 101 Hz would need 16 000, so beyond this the read position is rounded to
+ * the nearest 1/512 of an input sample (≤ 1/1024 of a sample of timing
+ * error, ~−60 dB relative to a 7 kHz signal, and only on such odd rates —
+ * far below any venue room's noise).
+ */
+const RESAMPLER_MAX_PHASES = 512
+
+/**
+ * Streaming band-limited resampler: a Kaiser-windowed-sinc low-pass evaluated
+ * at the fractional read position (polyphase decimation; Smith's
+ * bandlimited-interpolation method).
+ *
+ * The browser decides the AudioContext sample rate (44.1 kHz, 48 kHz, 24 kHz
+ * on some iOS devices) and `capture.ts` deliberately leaves it so (see
+ * `unlockSync`), so every capture path goes through this class.
+ *
+ * Until 2026-10-17 this was a plain linear interpolator, on the assumption
+ * that the path was a rarely-taken fallback. It was the live path: Mac Chrome
+ * diagnostics read `48kHz` on every microphone tried (built-in and a Razer
+ * USB mic). Linear interpolation does no anti-alias filtering, so 8–24 kHz
+ * energy folds straight into the speech band: an 11 kHz tone came out as a
+ * 5 kHz tone at full strength.
+ *
+ * That is a signal-processing defect, not a demonstrated recognition one. On
+ * two real speech clips (one re-recorded through a speaker, one a broadcast
+ * mic) the linear and filtered 16 kHz outputs correlated at 0.9997, and
+ * live-model runs agreed 97–99% within and across versions: speech carries
+ * little energy above 8 kHz. The filter is kept because it is the correct
+ * way to decimate and costs little, and because what speech does not
+ * exercise — wideband microphones, hiss, fans, sibilant-heavy PAs — would
+ * otherwise fold into the band the model listens to. The tone measurements
+ * are pinned in test/audio.test.ts.
+ *
+ * Each output at input position p is Σ x[k]·h(p − k), with h a windowed sinc
+ * cut off at `RESAMPLER_CUTOFF_RATIO` of the lower rate. Evaluating h at the
+ * fractional offset makes the low-pass and the fractional-delay interpolation
+ * one pass, for any ratio (3 for 48 kHz, 2.75625 for 44.1 kHz, 1.5 for
+ * 24 kHz). The coefficients for each distinct fractional offset are
+ * precomputed, each normalised to unity DC gain, so the inner loop is a plain
+ * dot product.
  *
  * "Streaming" is the important part: `process()` is called once per audio
- * callback and must not restart interpolation at each block boundary, or every
- * ~3 ms of audio acquires a discontinuity. The fractional read position and the
- * final sample of the previous block are therefore carried across calls.
+ * callback and must not restart at each block boundary, or every ~3 ms of
+ * audio acquires a discontinuity. The filter history (one kernel width of
+ * input) and the read position are carried across calls. The position is an
+ * exact integer plus a rational remainder, never an accumulated float, so any
+ * split of the same input yields bit-identical output.
+ *
+ * Behaviour change from the linear version (2026-10-17), for any host using
+ * this export directly:
+ *   * Latency: an output is emitted only once the half kernel of input to its
+ *     right has arrived — 80 samples (~1.7 ms) at 48 kHz, 74 at 44.1 kHz, 40
+ *     at 24 kHz. The first `process()` call therefore returns fewer samples
+ *     (a 128-frame first block at 48 kHz yields 16, not 43), and a stream's
+ *     final half kernel is only emitted if more input follows. Totals over a
+ *     long stream are unchanged apart from that fixed shortfall.
+ *   * Fade-in: the history starts as zeros, so the first outputs ramp in over
+ *     one half kernel instead of starting at full level.
+ *   * Output is timing-exact: sample n is the input at n × ratio, with no
+ *     one-sample lag (the linear version read one sample behind).
+ * Pass-through (equal rates) is unchanged: an immediate copy, no latency.
+ *
+ * Allocation: the history lives in one buffer reused across calls (grown only
+ * when a larger block arrives) and outputs are computed into a reused
+ * scratch. Each call still returns a fresh, exact-size array — the export is
+ * public, and a view into the scratch would be silently overwritten by the
+ * next call in any host that kept it. That is one small allocation per call
+ * (43 samples per 128-frame block at 48 kHz).
  */
 export class StreamingResampler {
-  private readonly ratio: number
-  private position = 0
-  private lastSample = 0
-  private primed = false
+  private readonly passThrough: boolean
+  /** Input samples advanced per output, as the exact fraction step / denominator. */
+  private readonly step: number = 1
+  private readonly denominator: number = 1
+  private readonly halfTaps: number = 0
+  /** `phases + 1` rows of `2 · halfTaps` taps; row i is fractional offset i / phases. */
+  private readonly phases: number = 0
+  private readonly coefficients: Float32Array = new Float32Array(0)
+
+  /** Reused input history; `history[0, filled)` is valid. */
+  private history = new Float32Array(0)
+  private filled = 0
+  /** Absolute input index of `history[0]`. */
+  private historyStart = 0
+  /** Reused output scratch, copied out exact-size on return. */
+  private scratch = new Float32Array(0)
+  /** Read position: `index + remainder / denominator`, in absolute input samples. */
+  private index = 0
+  private remainder = 0
 
   constructor(
     readonly inputSampleRate: number,
     readonly outputSampleRate: number = TARGET_SAMPLE_RATE,
   ) {
     if (inputSampleRate <= 0) throw new Error('inputSampleRate must be positive')
-    this.ratio = inputSampleRate / outputSampleRate
+    if (outputSampleRate <= 0) throw new Error('outputSampleRate must be positive')
+
+    // Exact bookkeeping needs integer rates. Every real AudioContext rate is
+    // one; rounding only guards a host passing 44100.0000001.
+    const input = Math.round(inputSampleRate)
+    const output = Math.round(outputSampleRate)
+    this.passThrough = input === output
+    // Pass-through needs no kernel, phases or history.
+    if (this.passThrough) return
+
+    const divisor = gcd(input, output)
+    this.step = input / divisor
+    this.denominator = output / divisor
+
+    // Normalised cutoff: 1 is the input Nyquist. halfTaps ≥ 26 × the ratio,
+    // so one output never advances the read position past the kept history.
+    const cutoff = (2 * RESAMPLER_CUTOFF_RATIO * Math.min(input, output)) / input
+    this.halfTaps = Math.ceil(RESAMPLER_ZERO_CROSSINGS / cutoff)
+    this.phases = Math.min(this.denominator, RESAMPLER_MAX_PHASES)
+    this.coefficients = buildPolyphase(cutoff, this.halfTaps, this.phases)
+    this.reset()
   }
 
   process(input: Float32Array): Float32Array {
     if (input.length === 0) return new Float32Array(0)
 
     // Pass-through when the context already runs at the target rate.
-    if (this.ratio === 1) return Float32Array.from(input)
+    if (this.passThrough) return Float32Array.from(input)
 
-    const output: number[] = []
-    let position = this.position
+    const { halfTaps, coefficients, step, denominator, phases } = this
+    const taps = 2 * halfTaps
 
-    while (position < input.length) {
-      const index = Math.floor(position)
-      const fraction = position - index
+    // History never holds more than 2·halfTaps − 1 kept samples plus this
+    // block, so the buffer grows only when a larger block than any before
+    // arrives — once, in practice, for the fixed 128-frame worklet quantum.
+    const needed = this.filled + input.length
+    if (needed > this.history.length) {
+      const grown = new Float32Array(taps + input.length)
+      grown.set(this.history.subarray(0, this.filled))
+      this.history = grown
+    }
+    const history = this.history
+    history.set(input, this.filled)
+    this.filled = needed
+    const end = this.historyStart + needed
 
-      // The sample before the read head may live in the previous block.
-      const previous =
-        index === 0 ? (this.primed ? this.lastSample : (input[0] ?? 0)) : (input[index - 1] ?? 0)
-      const current = input[index] ?? previous
+    const bound = Math.ceil((input.length * denominator) / step) + 1
+    if (bound > this.scratch.length) this.scratch = new Float32Array(bound)
+    const output = this.scratch
+    let count = 0
 
-      output.push(previous + (current - previous) * fraction)
-      position += this.ratio
+    // The output at index + fraction reads x[index − halfTaps + 1] through
+    // x[index + halfTaps]; stop when that right edge has not arrived yet.
+    while (this.index + halfTaps < end) {
+      // Row `phases` is offset 1.0, i.e. the next sample at offset 0: rounding
+      // up into it is exact, not an overrun.
+      const row = Math.round((this.remainder * phases) / denominator) * taps
+      const first = this.index - halfTaps + 1 - this.historyStart
+      let sum = 0
+      // Both reads are in bounds by construction (`first ≥ 0` because the
+      // history keeps the left edge; the row has `taps` entries); the
+      // assertions keep this hot loop free of `?? 0` branches.
+      for (let j = 0; j < taps; j += 1) {
+        sum += history[first + j]! * coefficients[row + j]!
+      }
+      output[count] = sum
+      count += 1
+
+      this.remainder += step
+      const whole = Math.floor(this.remainder / denominator)
+      this.index += whole
+      this.remainder -= whole * denominator
     }
 
-    // Carry the fractional remainder into the next block.
-    this.position = position - input.length
-    this.lastSample = input[input.length - 1] ?? this.lastSample
-    this.primed = true
+    // Keep only the history the next output's left edge can still reach,
+    // moved to the front in place.
+    const keepFrom = this.index - halfTaps + 1
+    const drop = keepFrom - this.historyStart
+    history.copyWithin(0, drop, this.filled)
+    this.filled -= drop
+    this.historyStart = keepFrom
 
-    return Float32Array.from(output)
+    return output.slice(0, count)
   }
 
   reset(): void {
-    this.position = 0
-    this.lastSample = 0
-    this.primed = false
+    if (this.passThrough) return
+    // Silence before the stream starts: the first outputs see zeros to their
+    // left, a half-kernel fade-in rather than a spurious step.
+    this.filled = this.halfTaps - 1
+    if (this.history.length < this.filled) this.history = new Float32Array(2 * this.halfTaps)
+    this.history.fill(0, 0, this.filled)
+    this.historyStart = 1 - this.halfTaps
+    this.index = 0
+    this.remainder = 0
   }
+}
+
+/**
+ * Row i, tap j holds h(t) for t = i / phases + halfTaps − 1 − j: the offset
+ * from input sample `index − halfTaps + 1 + j` to the read position. h(t) =
+ * sinc(cutoff · t) · kaiser(t / halfTaps), each row scaled to sum to 1 so
+ * every phase passes DC at exactly unity gain.
+ */
+function buildPolyphase(cutoff: number, halfTaps: number, phases: number): Float32Array {
+  const taps = 2 * halfTaps
+  const table = new Float32Array((phases + 1) * taps)
+  const norm = besselI0(RESAMPLER_KAISER_BETA)
+  for (let i = 0; i <= phases; i += 1) {
+    const fraction = i / phases
+    let total = 0
+    for (let j = 0; j < taps; j += 1) {
+      const t = fraction + halfTaps - 1 - j
+      const x = Math.PI * cutoff * t
+      const sinc = x === 0 ? 1 : Math.sin(x) / x
+      const edge = t / halfTaps
+      const window =
+        Math.abs(edge) >= 1
+          ? 0
+          : besselI0(RESAMPLER_KAISER_BETA * Math.sqrt(1 - edge * edge)) / norm
+      const value = sinc * window
+      table[i * taps + j] = value
+      total += value
+    }
+    for (let j = 0; j < taps; j += 1) table[i * taps + j] = (table[i * taps + j] ?? 0) / total
+  }
+  return table
+}
+
+/** Zeroth-order modified Bessel function of the first kind, by its power series. */
+function besselI0(x: number): number {
+  let sum = 1
+  let term = 1
+  const half = x / 2
+  for (let k = 1; k < 64; k += 1) {
+    term *= (half / k) * (half / k)
+    sum += term
+    if (term < sum * 1e-12) break
+  }
+  return sum
+}
+
+function gcd(a: number, b: number): number {
+  let x = a
+  let y = b
+  while (y !== 0) [x, y] = [y, x % y]
+  return x
 }
 
 /**
