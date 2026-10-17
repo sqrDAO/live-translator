@@ -14,7 +14,22 @@ import { enVi } from '@sqrdao/live-translate/lang/en-vi'
 import { enZh } from '@sqrdao/live-translate/lang/en-zh'
 import { viZh } from '@sqrdao/live-translate/lang/vi-zh'
 
-import { decide, idToken, listRequests, recheck, signIn, signOut, watchAuth, type AccessRequest, type AuthState } from './auth'
+import {
+  authErrorMessage,
+  decide,
+  idToken,
+  listRequests,
+  recheck,
+  resendVerification,
+  resetPassword,
+  signIn,
+  signInWithEmail,
+  signOut,
+  signUpWithEmail,
+  watchAuth,
+  type AccessRequest,
+  type AuthState,
+} from './auth'
 import { MemorySink, type StoredUtterance } from './memory-sink'
 import { bindThemeToggle } from './theme'
 import { TranscriptHistory, TranscriptArchive, TRANSCRIPT_PREFIX, TRANSCRIPT_DELETE_PREFIX, transcriptText, type TranscriptRecorder, type TranscriptSession } from './transcript-history'
@@ -605,6 +620,10 @@ const gateError = $('#gate-error')
 const signInBtn = $<HTMLButtonElement>('#gate-signin')
 const recheckBtn = $<HTMLButtonElement>('#gate-recheck')
 const switchBtn = $<HTMLButtonElement>('#gate-switch')
+const resendBtn = $<HTMLButtonElement>('#gate-resend')
+const gateForm = $<HTMLFormElement>('#gate-form')
+const emailInput = $<HTMLInputElement>('#gate-email')
+const passwordInput = $<HTMLInputElement>('#gate-password')
 const accountEl = $('#account')
 const accountEmail = $('#account-email')
 const signOutBtn = $<HTMLButtonElement>('#signout')
@@ -615,12 +634,13 @@ function showGateError(message: string | null): void {
 }
 
 function showAuthError(error: unknown): void {
-  showGateError(error instanceof Error ? error.message : String(error))
+  showGateError(authErrorMessage(error))
 }
 
 /** The gate's wording per state: Vietnamese first, English beneath, as elsewhere. */
 const GATE_TEXT = {
   out: ['Đăng nhập để sử dụng', 'approved accounts only'],
+  unverified: ['Xác nhận email', 'open the link we emailed you, then check again'],
   waiting: ['Đang chờ duyệt', 'access requested · an admin will approve it'],
   denied: ['Không có quyền truy cập', 'access was not approved'],
 } as const
@@ -640,23 +660,73 @@ function showAuth(state: AuthState): void {
   if (requestsDialog.open) requestsDialog.close()
   if (running) void stop()
   accountEl.hidden = true
-  const gate = state.kind === 'signed-out' ? 'out' : state.access === 'denied' ? 'denied' : 'waiting'
+  const gate =
+    state.kind === 'signed-out'
+      ? 'out'
+      : state.access === 'denied'
+        ? 'denied'
+        : state.access === 'unverified'
+          ? 'unverified'
+          : 'waiting'
   document.body.dataset.auth = gate
   gateVi.textContent = GATE_TEXT[gate][0]
   gateEn.textContent = state.kind === 'signed-in' ? `${state.email} · ${GATE_TEXT[gate][1]}` : GATE_TEXT[gate][1]
   signInBtn.hidden = gate !== 'out'
-  recheckBtn.hidden = gate !== 'waiting'
+  recheckBtn.hidden = gate !== 'waiting' && gate !== 'unverified'
+  resendBtn.hidden = gate !== 'unverified'
   switchBtn.hidden = gate === 'out'
 }
 
+// Each sign-in path's resulting state arrives through `watchAuth`.
 signInBtn.addEventListener('click', () => {
   showGateError(null)
-  // The resulting state arrives through `watchAuth`.
-  signIn().catch((error: unknown) => {
-    // Closing the popup is a change of mind, not a failure.
-    if ((error as { code?: string }).code === 'auth/popup-closed-by-user') return
-    showAuthError(error)
-  })
+  signIn().catch(showAuthError)
+})
+
+gateForm.addEventListener('submit', (event) => {
+  event.preventDefault()
+  const mode = (event.submitter as HTMLButtonElement | null)?.value === 'signup' ? 'signup' : 'signin'
+  const email = emailInput.value.trim()
+  const password = passwordInput.value
+  if (!email || !password) {
+    showGateError('Nhập email và mật khẩu · Enter your email and a password.')
+    return
+  }
+  if (mode === 'signup' && password.length < 8) {
+    showGateError('Mật khẩu quá yếu · Password too weak — use at least 8 characters.')
+    return
+  }
+  showGateError(null)
+  const buttons = gateForm.querySelectorAll<HTMLButtonElement>('button')
+  for (const button of buttons) button.disabled = true
+  ;(mode === 'signup' ? signUpWithEmail(email, password) : signInWithEmail(email, password))
+    .then(() => (passwordInput.value = ''))
+    .catch(showAuthError)
+    .finally(() => {
+      for (const button of buttons) button.disabled = false
+    })
+})
+
+$('#gate-forgot').addEventListener('click', () => {
+  const email = emailInput.value.trim()
+  if (!email) {
+    showGateError('Nhập email trước · Enter your email first, then press this again.')
+    emailInput.focus()
+    return
+  }
+  resetPassword(email)
+    // Worded the same whether or not the account exists: with enumeration
+    // protection on, Firebase does not say, and neither should this.
+    .then(() => showGateError(`Nếu ${email} có tài khoản, liên kết đặt lại đã được gửi · If ${email} has an account, a reset link is on its way.`))
+    .catch(showAuthError)
+})
+
+resendBtn.addEventListener('click', () => {
+  resendBtn.disabled = true
+  resendVerification()
+    .then(() => showGateError('Đã gửi lại · Sent — check your inbox and spam folder.'))
+    .catch(showAuthError)
+    .finally(() => (resendBtn.disabled = false))
 })
 
 recheckBtn.addEventListener('click', () => {

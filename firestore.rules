@@ -34,7 +34,9 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if (request.auth != null && request.auth.uid == uid) || isAdmin();
 
-      allow create: if request.auth != null
+      // A verified email only: with email/password sign-up anyone can claim
+      // any address, and the admin decides by the address shown.
+      allow create: if signedInEmail()
         && request.auth.uid == uid
         && request.resource.data.keys().hasOnly(['email', 'name', 'status', 'requestedAt'])
         && request.resource.data.status == 'pending'

@@ -42,7 +42,8 @@
     </script>
   </head>
   <!-- `data-auth`: pending until sign-in state is known, then `in`, `out`,
-       `waiting` (request filed, not yet approved) or `denied`.
+       `unverified` (email link not yet clicked), `waiting` (request filed,
+       not yet approved) or `denied`.
        Only `in` shows the stage; the server refuses to mint either way, so
        this is presentation, not the gate itself. -->
   <body data-auth="pending">
@@ -58,8 +59,23 @@
       <div class="gate-actions">
         <button type="button" class="history-button gate-primary" id="gate-signin">Sign in with Google</button>
         <button type="button" class="history-button gate-primary" id="gate-recheck" hidden>Check again</button>
+        <button type="button" class="history-button" id="gate-resend" hidden>Resend link</button>
         <button type="button" class="history-button" id="gate-switch" hidden>Use another account</button>
       </div>
+      <!-- Email and password, for people without a Google account. One form,
+           two submit buttons: which one was pressed decides sign in or sign up. -->
+      <form class="gate-form" id="gate-form" novalidate>
+        <p class="gate-or eyebrow">hoặc · or</p>
+        <label for="gate-email">Email</label>
+        <input id="gate-email" name="email" type="email" autocomplete="email" required />
+        <label for="gate-password">Mật khẩu · Password</label>
+        <input id="gate-password" name="password" type="password" autocomplete="current-password" minlength="8" required />
+        <div class="gate-form-actions">
+          <button type="submit" class="history-button gate-primary" value="signin">Sign in</button>
+          <button type="submit" class="history-button" value="signup">Create account</button>
+        </div>
+        <button type="button" class="link-button" id="gate-forgot">Quên mật khẩu? · Forgot password?</button>
+      </form>
       <p class="gate-error" id="gate-error" role="alert" hidden></p>
     </section>
     <div class="stage">

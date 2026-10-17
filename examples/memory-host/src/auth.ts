@@ -5,9 +5,22 @@
  */
 
 import { initializeApp } from 'firebase/app'
-import { GoogleAuthProvider, getAuth, onAuthStateChanged, signInWithPopup, signOut as firebaseSignOut, type Auth, type User } from 'firebase/auth'
+import {
+  GoogleAuthProvider,
+  createUserWithEmailAndPassword,
+  getAuth,
+  onAuthStateChanged,
+  sendEmailVerification,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut as firebaseSignOut,
+  type Auth,
+  type User,
+} from 'firebase/auth'
 
-export type Access = 'approved' | 'pending' | 'denied'
+/** Where a request stands; `unverified` is an email/password account that has not clicked its link. */
+export type Access = 'approved' | 'pending' | 'denied' | 'unverified'
 
 export interface FirebaseWebConfig {
   apiKey: string
@@ -44,10 +57,10 @@ async function sessionFetch(init?: RequestInit): Promise<Record<string, unknown>
 }
 
 /** Where the signed-in user stands; the first call files their access request. */
-export async function checkAccess(user: User): Promise<AuthState> {
+export async function checkAccess(user: User, forceRefresh = false): Promise<AuthState> {
   const body = await sessionFetch({
     method: 'POST',
-    headers: { authorization: `Bearer ${await user.getIdToken()}` },
+    headers: { authorization: `Bearer ${await user.getIdToken(forceRefresh)}` },
   })
   return {
     kind: 'signed-in',
@@ -74,8 +87,13 @@ export async function watchAuth(onChange: (state: AuthState) => void, onError: (
   })
 }
 
-export async function signIn(): Promise<void> {
+function ready(): Auth {
   if (!auth) throw new Error('sign-in is not ready')
+  return auth
+}
+
+export async function signIn(): Promise<void> {
+  const auth = ready()
   // A popup, not a redirect: redirects break when the auth domain differs from
   // the page's, as it does on Vercel, under third-party storage partitioning.
   await signInWithPopup(auth, new GoogleAuthProvider())
@@ -85,10 +103,63 @@ export async function signOut(): Promise<void> {
   if (auth) await firebaseSignOut(auth)
 }
 
-/** Re-asks the server, for the "check again" button while a request is pending. */
+export async function signInWithEmail(email: string, password: string): Promise<void> {
+  await signInWithEmailAndPassword(ready(), email, password)
+}
+
+/** Creates the account and sends the verification link; the request waits for the click. */
+export async function signUpWithEmail(email: string, password: string): Promise<void> {
+  const { user } = await createUserWithEmailAndPassword(ready(), email, password)
+  await sendEmailVerification(user)
+}
+
+export async function resendVerification(): Promise<void> {
+  const user = ready().currentUser
+  if (user) await sendEmailVerification(user)
+}
+
+export async function resetPassword(email: string): Promise<void> {
+  await sendPasswordResetEmail(ready(), email)
+}
+
+/**
+ * Re-asks the server, for "check again" while a request is pending or a
+ * verification link is outstanding. The reload and the forced token refresh
+ * matter for the latter: the ID token only says `email_verified` once it is
+ * reissued after the click.
+ */
 export async function recheck(): Promise<AuthState> {
   const user = auth?.currentUser
-  return user ? checkAccess(user) : { kind: 'signed-out' }
+  if (!user) return { kind: 'signed-out' }
+  await user.reload()
+  return checkAccess(user, true)
+}
+
+/** Firebase's error codes, as something a person can act on. */
+export function authErrorMessage(error: unknown): string | null {
+  const code = (error as { code?: string }).code
+  switch (code) {
+    case 'auth/popup-closed-by-user':
+    case 'auth/cancelled-popup-request':
+      return null // a change of mind, not a failure
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+    case 'auth/user-not-found':
+      return 'Email hoặc mật khẩu không đúng · Wrong email or password.'
+    case 'auth/email-already-in-use':
+      return 'Email này đã có tài khoản · That email already has an account — sign in instead, or reset the password.'
+    case 'auth/weak-password':
+    case 'auth/password-does-not-meet-requirements':
+      return 'Mật khẩu quá yếu · Password too weak — use at least 8 characters.'
+    case 'auth/invalid-email':
+      return 'Email không hợp lệ · That is not a valid email address.'
+    case 'auth/too-many-requests':
+      return 'Thử lại sau · Too many attempts — wait a few minutes and try again.'
+    case 'auth/account-exists-with-different-credential':
+      return 'Email này đăng nhập bằng cách khác · That email signs in another way — try Google or your password.'
+    default:
+      return error instanceof Error ? error.message : String(error)
+  }
 }
 
 // --- Admins ------------------------------------------------------------------
@@ -97,7 +168,8 @@ export interface AccessRequest {
   uid: string
   email: string | null
   name: string | null
-  status: Access
+  /** A filed request is never `unverified`: verification comes before filing. */
+  status: Exclude<Access, 'unverified'>
   requestedAt: string | null
   decidedBy: string | null
   decidedAt: string | null
@@ -120,7 +192,7 @@ export async function listRequests(): Promise<AccessRequest[]> {
   return (await requestsFetch()).requests as AccessRequest[]
 }
 
-export async function decide(uid: string, status: Access): Promise<void> {
+export async function decide(uid: string, status: AccessRequest['status']): Promise<void> {
   await requestsFetch({
     method: 'POST',
     headers: { 'content-type': 'application/json' },

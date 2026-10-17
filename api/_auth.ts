@@ -125,6 +125,8 @@ function decodeSegment(segment: string): Record<string, unknown> {
 export interface FirebaseUser {
   uid: string
   email: string | null
+  /** False for an email/password account whose link has not been clicked. */
+  emailVerified: boolean
   name: string | null
 }
 
@@ -170,6 +172,7 @@ export async function verifyFirebaseIdToken(
   return {
     uid: claims['sub'],
     email: typeof claims['email'] === 'string' ? claims['email'].toLowerCase() : null,
+    emailVerified: claims['email_verified'] === true,
     name: typeof claims['name'] === 'string' ? claims['name'] : null,
   }
 }
@@ -393,7 +396,8 @@ export interface SessionResult {
 /**
  * `/api/session`. GET hands the page the Firebase web config it needs to
  * offer sign-in. POST, with the ID token, reports the caller's access —
- * filing a `pending` request on the first sign-in.
+ * filing a `pending` request on the first sign-in with a verified email, and
+ * answering `unverified` until then.
  */
 export async function handleSessionRequest(
   input: AuthRequest & { method: string | undefined; env: Record<string, string | undefined> },
@@ -423,7 +427,10 @@ export async function handleSessionRequest(
     if (await isAdmin(idToken, config.projectId, deps)) {
       return { status: 200, body: { email: user.email, access: 'approved', admin: true } }
     }
-    let access = await readAccess(user, idToken, config.projectId, deps)
+    let access: AccessStatus | 'unverified' | null = await readAccess(user, idToken, config.projectId, deps)
+    // An unverified address could be anyone's, and the admin decides by the
+    // address shown: the rules refuse the request until the link is clicked.
+    if (access === null && !user.emailVerified) access = 'unverified'
     if (access === null) {
       await requestAccess(user, idToken, config.projectId, deps)
       access = 'pending'

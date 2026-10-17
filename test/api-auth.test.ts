@@ -37,6 +37,7 @@ function idToken(claims: Record<string, unknown> = {}, header: Record<string, un
     aud: PROJECT,
     sub: 'uid-ana',
     email: 'Ana@Example.com',
+    email_verified: true,
     name: 'Ana',
     iat: NOW / 1000 - 10,
     auth_time: NOW / 1000 - 10,
@@ -126,7 +127,7 @@ describe('Firebase ID token verification', () => {
     verifyFirebaseIdToken(token, { projectId: PROJECT, fetch, now: NOW })
 
   it('accepts a current token for this project, lowercasing the email', async () => {
-    await expect(verifyAt(idToken())).resolves.toEqual({ uid: 'uid-ana', email: 'ana@example.com', name: 'Ana' })
+    await expect(verifyAt(idToken())).resolves.toEqual({ uid: 'uid-ana', email: 'ana@example.com', emailVerified: true, name: 'Ana' })
   })
 
   it.each([
@@ -261,6 +262,14 @@ describe('/api/session', () => {
         name: { stringValue: 'Ana' },
       },
     })
+  })
+
+  it('files nothing for an unverified email/password account, and says so', async () => {
+    const google = fakeGoogle()
+    const result = await post(idToken({ email_verified: false }), google)
+
+    expect(result).toEqual({ status: 200, body: { email: 'ana@example.com', access: 'unverified', admin: false } })
+    expect(google.calls.some((call) => call.method === 'POST')).toBe(false)
   })
 
   it('reports an existing record without filing another', async () => {

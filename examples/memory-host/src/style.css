@@ -544,13 +544,76 @@ body:not([data-auth='in']):not([data-auth='pending']) .gate {
 }
 
 /* Two classes: `.history-button` is declared later and would win a tie. */
-.gate-actions .gate-primary {
+.gate-actions .gate-primary,
+.gate-form .gate-primary {
   background: var(--color-accent);
   color: var(--color-on-accent);
 }
 
 .gate-actions [hidden] {
   display: none;
+}
+
+.gate-form {
+  display: none;
+  width: min(320px, 100%);
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--spacing-xs);
+  text-align: left;
+}
+
+/* Only while signed out: every other gate state already has an account. */
+body[data-auth='out'] .gate-form {
+  display: flex;
+}
+
+.gate-or {
+  text-align: center;
+  font-size: 0.62rem;
+  margin: var(--spacing-md) 0 var(--spacing-xs);
+}
+
+.gate-form label {
+  font-family: var(--font-label-font-family);
+  font-weight: var(--font-label-font-weight);
+  font-size: 0.62rem;
+  letter-spacing: var(--font-label-letter-spacing);
+  text-transform: var(--font-label-text-transform);
+  color: var(--color-gold-ink);
+  opacity: 0.85;
+  margin-top: var(--spacing-xs);
+}
+
+/* Same well as the history picker: page canvas inside, hairline, 8px. */
+.gate-form input {
+  padding: var(--spacing-sm) 12px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: var(--component-button-radius);
+  color: var(--color-text-primary);
+  font: inherit;
+  /* 16px: anything smaller makes iOS Safari zoom the page on focus. */
+  font-size: 1rem;
+  transition: var(--component-button-transition);
+}
+
+.gate-form input:hover,
+.gate-form input:focus {
+  border-color: var(--color-text-secondary);
+}
+
+.gate-form-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+}
+
+.gate-form .link-button {
+  align-self: center;
+  margin-top: var(--spacing-sm);
+  font-size: 0.78rem;
 }
 
 .gate-error {
