@@ -628,7 +628,11 @@ const resendBtn = $<HTMLButtonElement>('#gate-resend')
 const gateForm = $<HTMLFormElement>('#gate-form')
 const emailInput = $<HTMLInputElement>('#gate-email')
 const passwordInput = $<HTMLInputElement>('#gate-password')
-const linkBtn = $<HTMLButtonElement>('#gate-link')
+const submitBtn = $<HTMLButtonElement>('#gate-submit')
+const toggleBtn = $<HTMLButtonElement>('#gate-toggle')
+const gateHint = $('#gate-hint')
+const passwordTab = $<HTMLButtonElement>('#gate-tab-password')
+const linkTab = $<HTMLButtonElement>('#gate-tab-link')
 /** Set on the return trip from an emailed link whose address must be re-entered. */
 let finishingLink = false
 const accountEl = $('#account')
@@ -692,53 +696,94 @@ signInBtn.addEventListener('click', () => {
   signIn().catch(showAuthError)
 })
 
+type FormMode = 'signin' | 'signup' | 'link'
+
+/**
+ * Shows one way in at a time. The fields, the hint and the submit button's
+ * label all follow the mode, so the button always says what it will do.
+ */
+function setFormMode(mode: FormMode): void {
+  gateForm.dataset.mode = mode
+  passwordTab.setAttribute('aria-selected', String(mode !== 'link'))
+  linkTab.setAttribute('aria-selected', String(mode === 'link'))
+  // Lets password managers offer to save a new password, or fill a saved one.
+  passwordInput.autocomplete = mode === 'signup' ? 'new-password' : 'current-password'
+  submitBtn.textContent = {
+    signin: 'Đăng nhập · Sign in',
+    signup: 'Tạo tài khoản · Create account',
+    link: finishingLink ? 'Hoàn tất · Finish sign-in' : 'Gửi liên kết · Email me a sign-in link',
+  }[mode]
+  toggleBtn.textContent = mode === 'signup' ? 'Đã có tài khoản? · Sign in instead' : 'Chưa có tài khoản? · Create an account'
+  gateHint.textContent = {
+    signin: '',
+    signup: 'At least 8 characters. We will email you a link to confirm the address.',
+    link: 'No password: we email you a one-time link that signs you in.',
+  }[mode]
+  showGateError(null)
+}
+
+function formMode(): FormMode {
+  const mode = gateForm.dataset.mode
+  return mode === 'signup' || mode === 'link' ? mode : 'signin'
+}
+
+passwordTab.addEventListener('click', () => setFormMode('signin'))
+linkTab.addEventListener('click', () => setFormMode('link'))
+toggleBtn.addEventListener('click', () => setFormMode(formMode() === 'signup' ? 'signin' : 'signup'))
+
+/** Disables the form while `work` runs; logs and shows any failure. */
+function busy(work: Promise<unknown>): void {
+  const buttons = gateForm.querySelectorAll<HTMLButtonElement>('button')
+  for (const button of buttons) button.disabled = true
+  work
+    .catch((error: unknown) => {
+      // The code (e.g. auth/email-already-in-use) is what to look for when a
+      // sign-in "does nothing".
+      console.error('[sign-in]', error)
+      showAuthError(error)
+    })
+    .finally(() => {
+      for (const button of buttons) button.disabled = false
+    })
+}
+
 gateForm.addEventListener('submit', (event) => {
   event.preventDefault()
-  const submitted = (event.submitter as HTMLButtonElement | null)?.value
-  const mode = submitted === 'signup' || submitted === 'link' ? submitted : 'signin'
+  const mode = formMode()
   const email = emailInput.value.trim()
   const password = passwordInput.value
-  if (mode === 'link') {
-    if (!email) {
-      showGateError('Nhập email · Enter your email address.')
-      emailInput.focus()
-      return
-    }
-    submitLink(email)
+  if (!email) {
+    showGateError('Nhập email · Enter your email address.')
+    emailInput.focus()
     return
   }
-  if (!email || !password) {
-    showGateError('Nhập email và mật khẩu · Enter your email and a password.')
+  if (mode === 'link') {
+    showGateError(null)
+    busy(
+      finishingLink
+        ? finishSignInLink(email).then(() => {
+            finishingLink = false
+            setFormMode('link')
+          })
+        : sendSignInLink(email).then(() =>
+            showGateError(`Đã gửi liên kết đến ${email} · A sign-in link is on its way to ${email}. Open it in this browser.`),
+          ),
+    )
+    return
+  }
+  if (!password) {
+    showGateError('Nhập mật khẩu · Enter your password.')
+    passwordInput.focus()
     return
   }
   if (mode === 'signup' && password.length < 8) {
     showGateError('Mật khẩu quá yếu · Password too weak — use at least 8 characters.')
+    passwordInput.focus()
     return
   }
   showGateError(null)
-  const buttons = gateForm.querySelectorAll<HTMLButtonElement>('button')
-  for (const button of buttons) button.disabled = true
-  ;(mode === 'signup' ? signUpWithEmail(email, password) : signInWithEmail(email, password))
-    .then(() => (passwordInput.value = ''))
-    .catch(showAuthError)
-    .finally(() => {
-      for (const button of buttons) button.disabled = false
-    })
+  busy((mode === 'signup' ? signUpWithEmail(email, password) : signInWithEmail(email, password)).then(() => (passwordInput.value = '')))
 })
-
-function submitLink(email: string): void {
-  showGateError(null)
-  linkBtn.disabled = true
-  const work = finishingLink
-    ? finishSignInLink(email).then(() => {
-        finishingLink = false
-        linkBtn.textContent = 'Email me a sign-in link'
-      })
-    : sendSignInLink(email).then(() =>
-        showGateError(`Đã gửi liên kết đến ${email} · A sign-in link is on its way to ${email}. Open it in this browser.`),
-      )
-  work.catch(showAuthError).finally(() => (linkBtn.disabled = false))
-}
 
 /**
  * The return trip from an emailed link: finish at once when this browser sent
@@ -748,11 +793,11 @@ function resumeSignInLink(): void {
   if (!arrivedWithSignInLink()) return
   const email = rememberedLinkEmail()
   if (email) {
-    finishSignInLink(email).catch(showAuthError)
+    busy(finishSignInLink(email))
     return
   }
   finishingLink = true
-  linkBtn.textContent = 'Finish sign-in'
+  setFormMode('link')
   showGateError('Nhập lại email để hoàn tất · Enter the email the link was sent to, then press Finish sign-in.')
 }
 
@@ -763,11 +808,12 @@ $('#gate-forgot').addEventListener('click', () => {
     emailInput.focus()
     return
   }
-  resetPassword(email)
-    // Worded the same whether or not the account exists: with enumeration
-    // protection on, Firebase does not say, and neither should this.
-    .then(() => showGateError(`Nếu ${email} có tài khoản, liên kết đặt lại đã được gửi · If ${email} has an account, a reset link is on its way.`))
-    .catch(showAuthError)
+  busy(
+    resetPassword(email)
+      // Worded the same whether or not the account exists: with enumeration
+      // protection on, Firebase does not say, and neither should this.
+      .then(() => showGateError(`Nếu ${email} có tài khoản, liên kết đặt lại đã được gửi · If ${email} has an account, a reset link is on its way.`)),
+  )
 })
 
 resendBtn.addEventListener('click', () => {

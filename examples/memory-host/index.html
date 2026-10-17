@@ -62,23 +62,27 @@
         <button type="button" class="history-button" id="gate-resend" hidden>Resend link</button>
         <button type="button" class="history-button" id="gate-switch" hidden>Use another account</button>
       </div>
-      <!-- Email, for people without a Google account. One form, three submit
-           buttons: which one was pressed decides password sign-in, sign-up,
-           or a passwordless link. -->
-      <form class="gate-form" id="gate-form" novalidate>
+      <!-- Email, for people without a Google account. `data-mode` is
+           `signin`, `signup` or `link`; it decides which fields show and what
+           the one submit button does, and the button's label says so. -->
+      <form class="gate-form" id="gate-form" data-mode="signin" novalidate>
         <p class="gate-or eyebrow">hoặc · or</p>
+        <div class="gate-tabs" role="tablist" aria-label="Email sign-in method">
+          <button type="button" role="tab" id="gate-tab-password" aria-selected="true">Mật khẩu · Password</button>
+          <button type="button" role="tab" id="gate-tab-link" aria-selected="false">Liên kết · Email link</button>
+        </div>
         <label for="gate-email">Email</label>
         <input id="gate-email" name="email" type="email" autocomplete="email" required />
-        <label for="gate-password">Mật khẩu · Password</label>
-        <input id="gate-password" name="password" type="password" autocomplete="current-password" minlength="8" required />
-        <div class="gate-form-actions">
-          <button type="submit" class="history-button gate-primary" value="signin">Sign in</button>
-          <button type="submit" class="history-button" value="signup">Create account</button>
+        <div class="gate-password-field">
+          <label for="gate-password">Mật khẩu · Password</label>
+          <input id="gate-password" name="password" type="password" autocomplete="current-password" minlength="8" required />
         </div>
-        <!-- Passwordless: needs only the email field. On the return trip from
-             the emailed link, main.ts relabels it to finish the sign-in. -->
-        <button type="submit" class="history-button gate-link" id="gate-link" value="link">Email me a sign-in link</button>
-        <button type="button" class="link-button" id="gate-forgot">Quên mật khẩu? · Forgot password?</button>
+        <p class="gate-hint" id="gate-hint"></p>
+        <button type="submit" class="history-button gate-primary" id="gate-submit">Sign in</button>
+        <div class="gate-links">
+          <button type="button" class="link-button" id="gate-toggle">Chưa có tài khoản? · Create an account</button>
+          <button type="button" class="link-button" id="gate-forgot">Quên mật khẩu? · Forgot password?</button>
+        </div>
       </form>
       <p class="gate-error" id="gate-error" role="alert" hidden></p>
     </section>

@@ -603,21 +603,71 @@ body[data-auth='out'] .gate-form {
   border-color: var(--color-text-secondary);
 }
 
-.gate-form-actions {
+/* Password or link: a two-way switch over the form, the chosen side filled. */
+.gate-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: var(--spacing-sm);
-  margin-top: var(--spacing-sm);
+  padding: 3px;
+  margin-bottom: var(--spacing-xs);
+  border: 1px solid var(--color-border);
+  border-radius: var(--component-button-radius);
 }
 
-.gate-link {
-  margin-top: var(--spacing-xs);
-}
-
-.gate-form .link-button {
-  align-self: center;
-  margin-top: var(--spacing-sm);
+.gate-tabs button {
+  appearance: none;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: none;
+  border: none;
+  border-radius: calc(var(--component-button-radius) - 3px);
+  color: var(--color-text-secondary);
+  font: inherit;
   font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--component-button-transition);
+}
+
+.gate-tabs button[aria-selected='true'] {
+  background: var(--component-chip-background);
+  color: var(--color-text-primary);
+}
+
+.gate-password-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.gate-hint {
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+}
+
+.gate-hint:empty {
+  display: none;
+}
+
+.gate-form #gate-submit {
+  margin-top: var(--spacing-sm);
+}
+
+.gate-links {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-xs);
+  margin-top: var(--spacing-sm);
+}
+
+.gate-links .link-button {
+  font-size: 0.78rem;
+}
+
+/* The link needs only the address; signing up needs no reset link. */
+.gate-form[data-mode='link'] .gate-password-field,
+.gate-form[data-mode='link'] .gate-links,
+.gate-form[data-mode='signup'] #gate-forgot {
+  display: none;
 }
 
 .gate-error {

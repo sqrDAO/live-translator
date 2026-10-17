@@ -197,9 +197,11 @@ export function authErrorMessage(error: unknown): string | null {
     case 'auth/invalid-credential':
     case 'auth/wrong-password':
     case 'auth/user-not-found':
-      return 'Email hoặc mật khẩu không đúng · Wrong email or password.'
+      return 'Email hoặc mật khẩu không đúng · Wrong email or password. If you joined with Google, use Sign in with Google.'
     case 'auth/email-already-in-use':
-      return 'Email này đã có tài khoản · That email already has an account — sign in instead, or reset the password.'
+      // Most often a Google account: Firebase keeps one account per address,
+      // and a Google sign-up has no password to sign in with.
+      return 'Email này đã có tài khoản · That email already has an account. If you joined with Google, use Sign in with Google; otherwise sign in, or reset the password.'
     case 'auth/weak-password':
     case 'auth/password-does-not-meet-requirements':
       return 'Mật khẩu quá yếu · Password too weak — use at least 8 characters.'
