@@ -9,10 +9,13 @@ import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
   getAuth,
+  isSignInWithEmailLink,
   onAuthStateChanged,
   sendEmailVerification,
   sendPasswordResetEmail,
+  sendSignInLinkToEmail,
   signInWithEmailAndPassword,
+  signInWithEmailLink,
   signInWithPopup,
   signOut as firebaseSignOut,
   type Auth,
@@ -113,6 +116,55 @@ export async function signUpWithEmail(email: string, password: string): Promise<
   await sendEmailVerification(user)
 }
 
+/**
+ * The address a sign-in link was sent to, kept so the link opened in this
+ * browser can finish without asking again. Opened elsewhere, it must be
+ * re-entered: Firebase requires the email to match, so a forwarded link
+ * alone signs nobody in.
+ */
+const LINK_EMAIL_KEY = 'live-translate:signin-email'
+
+/** Emails a one-time sign-in link back to this page. */
+export async function sendSignInLink(email: string): Promise<void> {
+  await sendSignInLinkToEmail(ready(), email, {
+    url: `${window.location.origin}${window.location.pathname}`,
+    handleCodeInApp: true,
+  })
+  try {
+    window.localStorage.setItem(LINK_EMAIL_KEY, email)
+  } catch {
+    // Without storage the link still works; the email is asked for again.
+  }
+}
+
+/** Whether this page load is the return trip from a sign-in link. */
+export function arrivedWithSignInLink(): boolean {
+  return Boolean(auth && isSignInWithEmailLink(auth, window.location.href))
+}
+
+export function rememberedLinkEmail(): string | null {
+  try {
+    return window.localStorage.getItem(LINK_EMAIL_KEY)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Completes a link sign-in. Clicking the link proves the address, so the
+ * account arrives verified and its request is filed straight away.
+ */
+export async function finishSignInLink(email: string): Promise<void> {
+  await signInWithEmailLink(ready(), email, window.location.href)
+  try {
+    window.localStorage.removeItem(LINK_EMAIL_KEY)
+  } catch {
+    // Nothing to clean up.
+  }
+  // The one-time code is spent; keep it out of the address bar and history.
+  window.history.replaceState(null, '', window.location.pathname)
+}
+
 export async function resendVerification(): Promise<void> {
   const user = ready().currentUser
   if (user) await sendEmailVerification(user)
@@ -155,6 +207,9 @@ export function authErrorMessage(error: unknown): string | null {
       return 'Email không hợp lệ · That is not a valid email address.'
     case 'auth/too-many-requests':
       return 'Thử lại sau · Too many attempts — wait a few minutes and try again.'
+    case 'auth/invalid-action-code':
+    case 'auth/expired-action-code':
+      return 'Liên kết đã hết hạn hoặc đã dùng · That sign-in link has expired or was already used — send a new one.'
     case 'auth/account-exists-with-different-credential':
       return 'Email này đăng nhập bằng cách khác · That email signs in another way — try Google or your password.'
     default:

@@ -42,6 +42,11 @@ Only approved people can use a deployment. Access is self-serve:
    Email/password accounts must first open the verification link Firebase
    emails them: anyone can sign up claiming any address, and the admin
    approves by the address shown. **Forgot password?** sends a reset link.
+   **Email me a sign-in link** is the passwordless option: opening the link
+   signs the person in with the address already verified. Opened in another
+   browser than the one that asked, it asks for the email again — Firebase
+   will not complete a link without it, so a forwarded link alone does not
+   sign anyone in.
 2. Their first sign-in with a verified email files `users/{uid}` in Firestore
    with `status: "pending"`, their email and name. The page says it is
    waiting for approval.
@@ -75,8 +80,8 @@ holds no service-account key.
 Settings, all required on a deployment (see `.env.example`):
 `FIREBASE_PROJECT_ID`, `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`,
 `FIREBASE_APP_ID` — the web app's public config. In the Firebase console,
-Google and Email/Password must be enabled under Authentication → Sign-in
-method (the project also enforces an 8-character password minimum), and every
+Google and Email/Password (with *Email link (passwordless sign-in)*) must be
+enabled under Authentication → Sign-in method (the project also enforces an 8-character password minimum), and every
 domain the page is served from listed under Authentication → Settings →
 Authorized domains (`localhost` is there by default).
 

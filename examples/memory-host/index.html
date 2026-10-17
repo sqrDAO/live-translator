@@ -62,8 +62,9 @@
         <button type="button" class="history-button" id="gate-resend" hidden>Resend link</button>
         <button type="button" class="history-button" id="gate-switch" hidden>Use another account</button>
       </div>
-      <!-- Email and password, for people without a Google account. One form,
-           two submit buttons: which one was pressed decides sign in or sign up. -->
+      <!-- Email, for people without a Google account. One form, three submit
+           buttons: which one was pressed decides password sign-in, sign-up,
+           or a passwordless link. -->
       <form class="gate-form" id="gate-form" novalidate>
         <p class="gate-or eyebrow">hoặc · or</p>
         <label for="gate-email">Email</label>
@@ -74,6 +75,9 @@
           <button type="submit" class="history-button gate-primary" value="signin">Sign in</button>
           <button type="submit" class="history-button" value="signup">Create account</button>
         </div>
+        <!-- Passwordless: needs only the email field. On the return trip from
+             the emailed link, main.ts relabels it to finish the sign-in. -->
+        <button type="submit" class="history-button gate-link" id="gate-link" value="link">Email me a sign-in link</button>
         <button type="button" class="link-button" id="gate-forgot">Quên mật khẩu? · Forgot password?</button>
       </form>
       <p class="gate-error" id="gate-error" role="alert" hidden></p>

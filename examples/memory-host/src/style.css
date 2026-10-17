@@ -610,6 +610,10 @@ body[data-auth='out'] .gate-form {
   margin-top: var(--spacing-sm);
 }
 
+.gate-link {
+  margin-top: var(--spacing-xs);
+}
+
 .gate-form .link-button {
   align-self: center;
   margin-top: var(--spacing-sm);

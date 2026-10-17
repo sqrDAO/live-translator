@@ -15,13 +15,17 @@ import { enZh } from '@sqrdao/live-translate/lang/en-zh'
 import { viZh } from '@sqrdao/live-translate/lang/vi-zh'
 
 import {
+  arrivedWithSignInLink,
   authErrorMessage,
   decide,
+  finishSignInLink,
   idToken,
   listRequests,
   recheck,
+  rememberedLinkEmail,
   resendVerification,
   resetPassword,
+  sendSignInLink,
   signIn,
   signInWithEmail,
   signOut,
@@ -624,6 +628,9 @@ const resendBtn = $<HTMLButtonElement>('#gate-resend')
 const gateForm = $<HTMLFormElement>('#gate-form')
 const emailInput = $<HTMLInputElement>('#gate-email')
 const passwordInput = $<HTMLInputElement>('#gate-password')
+const linkBtn = $<HTMLButtonElement>('#gate-link')
+/** Set on the return trip from an emailed link whose address must be re-entered. */
+let finishingLink = false
 const accountEl = $('#account')
 const accountEmail = $('#account-email')
 const signOutBtn = $<HTMLButtonElement>('#signout')
@@ -646,7 +653,9 @@ const GATE_TEXT = {
 } as const
 
 function showAuth(state: AuthState): void {
-  showGateError(null)
+  // Firebase reports "signed out" as it starts, which would otherwise wipe
+  // the prompt to re-enter the email a link was sent to.
+  if (!finishingLink) showGateError(null)
   if (state.kind === 'signed-in' && state.access === 'approved') {
     document.body.dataset.auth = 'in'
     accountEmail.textContent = state.dev ? `${state.email} · development, no sign-in` : state.email
@@ -685,9 +694,19 @@ signInBtn.addEventListener('click', () => {
 
 gateForm.addEventListener('submit', (event) => {
   event.preventDefault()
-  const mode = (event.submitter as HTMLButtonElement | null)?.value === 'signup' ? 'signup' : 'signin'
+  const submitted = (event.submitter as HTMLButtonElement | null)?.value
+  const mode = submitted === 'signup' || submitted === 'link' ? submitted : 'signin'
   const email = emailInput.value.trim()
   const password = passwordInput.value
+  if (mode === 'link') {
+    if (!email) {
+      showGateError('Nhập email · Enter your email address.')
+      emailInput.focus()
+      return
+    }
+    submitLink(email)
+    return
+  }
   if (!email || !password) {
     showGateError('Nhập email và mật khẩu · Enter your email and a password.')
     return
@@ -706,6 +725,36 @@ gateForm.addEventListener('submit', (event) => {
       for (const button of buttons) button.disabled = false
     })
 })
+
+function submitLink(email: string): void {
+  showGateError(null)
+  linkBtn.disabled = true
+  const work = finishingLink
+    ? finishSignInLink(email).then(() => {
+        finishingLink = false
+        linkBtn.textContent = 'Email me a sign-in link'
+      })
+    : sendSignInLink(email).then(() =>
+        showGateError(`Đã gửi liên kết đến ${email} · A sign-in link is on its way to ${email}. Open it in this browser.`),
+      )
+  work.catch(showAuthError).finally(() => (linkBtn.disabled = false))
+}
+
+/**
+ * The return trip from an emailed link: finish at once when this browser sent
+ * it, otherwise ask for the address — the link is only good with it.
+ */
+function resumeSignInLink(): void {
+  if (!arrivedWithSignInLink()) return
+  const email = rememberedLinkEmail()
+  if (email) {
+    finishSignInLink(email).catch(showAuthError)
+    return
+  }
+  finishingLink = true
+  linkBtn.textContent = 'Finish sign-in'
+  showGateError('Nhập lại email để hoàn tất · Enter the email the link was sent to, then press Finish sign-in.')
+}
 
 $('#gate-forgot').addEventListener('click', () => {
   const email = emailInput.value.trim()
@@ -832,7 +881,7 @@ requestsList.addEventListener('click', (event) => {
     })
 })
 
-watchAuth(showAuth, showAuthError).catch((error: unknown) => {
+watchAuth(showAuth, showAuthError).then(resumeSignInLink, (error: unknown) => {
   document.body.dataset.auth = 'out'
   signInBtn.hidden = true
   showAuthError(error)
