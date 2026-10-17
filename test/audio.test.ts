@@ -90,6 +90,26 @@ describe('PCM conversion and resampling', () => {
     }
   })
 
+  it('holds back half a kernel on the first call (the documented behaviour change)', () => {
+    // The linear version returned 43 samples for a first 128-frame block at
+    // 48 kHz; the filter needs the 80 input samples right of each output.
+    expect(new StreamingResampler(48_000).process(new Float32Array(128))).toHaveLength(16)
+  })
+
+  it('returns arrays that later calls do not overwrite, and resets to the same output', () => {
+    // History and output scratch are reused across calls; what is returned
+    // must not be, because the export is public and a host may keep it.
+    const input = tone(48_000, 1000, 0.05)
+    const r = new StreamingResampler(48_000)
+    const first = r.process(input.subarray(0, 1200))
+    const kept = Float32Array.from(first)
+    r.process(input.subarray(1200))
+    expect(first).toEqual(kept)
+
+    r.reset()
+    expect(r.process(input.subarray(0, 1200))).toEqual(kept)
+  })
+
   it('keeps speech-band tones at unity gain', () => {
     for (const rate of [48_000, 44_100, 24_000]) {
       for (const frequency of [300, 1000, 4000, 6000]) {

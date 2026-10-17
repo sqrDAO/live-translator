@@ -10,8 +10,7 @@
  *   * synchronous AudioContext unlock inside the user's tap (iOS)
  *   * resume after the microphone permission prompt returns (iOS)
  *   * AudioWorklet capture rather than the deprecated ScriptProcessor
- *   * a 16 kHz AudioContext where the browser honours it, else a band-limited
- *     browser-rate to 16 kHz streaming resample; PCM16, 100 ms chunks
+ *   * browser-rate to 16 kHz streaming resample, PCM16, 100 ms chunks
  *   * saved-microphone fallback after OverconstrainedError
  *   * echo cancellation disabled: the output is text, and AEC removes the
  *     room PA's own voice, which is exactly what we are transcribing
@@ -83,47 +82,6 @@ export interface CaptureOptions {
   onDiagnostics?: (diagnostics: CaptureDiagnostics) => void
 }
 
-/** How long `connectSource` waits for a replacement context to start. */
-const RESUME_TIMEOUT_MS = 2000
-
-/**
- * Set once a browser has refused a microphone into a 16 kHz context
- * (Firefox; see `AudioCapture.connectSource`). From then on, contexts on this
- * page are created at the default rate and `StreamingResampler` converts.
- */
-let forcedRateRejected = false
-
-/** Contexts actually constructed with the 16 kHz request, as opposed to the bare fallback. */
-const forcedRates = new WeakSet<AudioContext>()
-
-/**
- * Synchronous by contract: `unlockSync` calls this inside the user's tap.
- *
- * `{ sampleRate }` throws on the legacy `webkitAudioContext` (older Safari
- * takes no options) and on a browser that cannot run at 16 kHz at all; both
- * get the bare constructor, i.e. the hardware rate, which the resampler
- * handles.
- */
-function createContext(requestTargetRate: boolean): AudioContext {
-  const Ctor =
-    window.AudioContext ??
-    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-  if (requestTargetRate) {
-    try {
-      const context = new Ctor({ sampleRate: TARGET_SAMPLE_RATE })
-      forcedRates.add(context)
-      return context
-    } catch {
-      // Fall through to the bare constructor.
-    }
-  }
-  return new Ctor()
-}
-
-function isRunning(context: AudioContext): boolean {
-  return context.state === 'running'
-}
-
 /** Package-namespaced, never a bare app key: see `CaptureOptions.storageKey`. */
 export const DEFAULT_DEVICE_STORAGE_KEY = '@sqrdao/live-translate:deviceId'
 
@@ -168,21 +126,23 @@ export class AudioCapture {
    * and yields a permanently suspended context that produces silence with no
    * error.
    *
-   * The context asks for 16 kHz so the browser does the conversion with its
-   * own filtered resampler, as the reference app did. The package spinout
-   * dropped that request, and on 2026-10-17 Mac Chrome diagnostics read
-   * `48kHz` on every microphone tried, i.e. every chunk was going through the
-   * main-thread resampler. The request is a preference, not a guarantee:
-   * iOS is reported to keep 48 kHz regardless (without throwing), old
-   * `webkitAudioContext` rejects the options argument outright (caught
-   * below), and Firefox accepts it but then refuses to connect a microphone
-   * running at another rate (see `connectSource`). `StreamingResampler`
-   * therefore still handles whatever rate this ends up at, and does it with a
-   * proper low-pass. The constructor stays synchronous either way.
+   * The context deliberately runs at the browser's own rate (48 kHz on every
+   * Mac Chrome mic tried, 2026-10-17); `StreamingResampler` band-limits it to
+   * 16 kHz. Forcing `{ sampleRate: 16000 }` here, as the reference app did,
+   * was tried in PR #16 and backed out: on two real speech clips (one played
+   * through a speaker, one a broadcast mic) the 16 kHz outputs correlated at
+   * 0.9997 and model runs agreed 97–99% either way, while the forced rate
+   * added risk: Firefox refuses a mic whose rate differs from the context's
+   * (NotSupportedError), Safari accepts the rate and may silently garble
+   * cross-rate MediaStreamSource audio, and a recovery path needs a new
+   * context outside the gesture.
    */
   unlockSync(): AudioContext {
     if (!this.context || this.context.state === 'closed') {
-      this.context = createContext(!forcedRateRejected)
+      const Ctor =
+        window.AudioContext ??
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      this.context = new Ctor()
     }
     void this.context.resume()
     this.diagnostics.contextSampleRate = this.context.sampleRate
@@ -191,7 +151,7 @@ export class AudioCapture {
 
   async start(options: CaptureOptions): Promise<void> {
     const generation = ++this.generation
-    let context = this.unlockSync()
+    const context = this.unlockSync()
     this.storageKey = options.storageKey ?? DEFAULT_DEVICE_STORAGE_KEY
 
     let stream: MediaStream | null = null
@@ -229,14 +189,6 @@ export class AudioCapture {
         if (pinned && settings.deviceId) saveDevice(this.storageKey, settings.deviceId)
       }
 
-      // The source is made before the worklet module is loaded, because this
-      // is the step that may have to swap the context, and a module added to
-      // the discarded context would be lost with it.
-      const connected = await this.connectSource(context, stream, generation)
-      if (!connected) return void this.releaseStream(stream)
-      context = connected.context
-      const source = connected.source
-
       await context.audioWorklet.addModule(workletUrl())
       if (generation !== this.generation) return void this.releaseStream(stream)
 
@@ -244,7 +196,7 @@ export class AudioCapture {
       this.accumulator.reset()
       this.detector.reset()
 
-      this.source = source
+      this.source = context.createMediaStreamSource(stream)
       this.worklet = new AudioWorkletNode(context, WORKLET_NAME)
       this.worklet.port.onmessage = (event: MessageEvent<Float32Array>) => {
         if (generation !== this.generation) return
@@ -271,74 +223,6 @@ export class AudioCapture {
       options.onError(error instanceof Error ? error : new Error(String(error)))
       await this.stop()
     }
-  }
-
-  /**
-   * Connects the microphone, swapping to a native-rate context when the
-   * browser refuses the 16 kHz one.
-   *
-   * Firefox does not resample between a MediaStream and a context running at
-   * a different rate: `createMediaStreamSource` throws NotSupportedError
-   * ("Connecting AudioNodes from AudioContexts with different sample-rate is
-   * currently not supported"). Recovering means a new context at the default
-   * rate, created here, after `getUserMedia` resolved: outside the user's tap.
-   * That is acceptable on Firefox and nowhere else needs it:
-   *   * Firefox gates Web Audio on the page's *sticky* user activation, and
-   *     this start was begun from a tap, so a context created now may run.
-   *   * iOS, the platform whose unlock rule `unlockSync` exists for, keeps
-   *     its own rate instead of throwing, so it never reaches this path.
-   * If a browser does still hold the new context suspended, `resume()` would
-   * never settle and the capture would hang with no error. The wait is
-   * therefore bounded: past `RESUME_TIMEOUT_MS` the start fails with an error
-   * telling the operator to tap again. That retry works, because
-   * `forcedRateRejected` is already set, so the next tap's `unlockSync`
-   * builds the native-rate context inside the gesture.
-   *
-   * @returns null when this start was superseded meanwhile.
-   */
-  private async connectSource(
-    context: AudioContext,
-    stream: MediaStream,
-    generation: number,
-  ): Promise<{ context: AudioContext; source: MediaStreamAudioSourceNode } | null> {
-    try {
-      return { context, source: context.createMediaStreamSource(stream) }
-    } catch (error) {
-      const name = (error as { name?: string }).name
-      if (name !== 'NotSupportedError' || !forcedRates.has(context)) throw error
-    }
-
-    // Remembered for the page, not the instance: the microphone's rate will
-    // not differ on the next start, and a host may build a fresh capture.
-    forcedRateRejected = true
-    // Re-checked so a superseded start never replaces the context the winner
-    // took from `unlockSync`; nothing between here and the assignment awaits.
-    if (generation !== this.generation) return null
-    const rejected = context
-    const replacement = createContext(false)
-    this.context = replacement
-    this.diagnostics.contextSampleRate = replacement.sampleRate
-    void rejected.close()
-
-    if (replacement.state !== 'running') {
-      let timer: ReturnType<typeof setTimeout> | undefined
-      const resumed = await Promise.race([
-        replacement.resume().then(() => true),
-        new Promise<false>((resolve) => {
-          timer = setTimeout(() => resolve(false), RESUME_TIMEOUT_MS)
-        }),
-      ]).finally(() => clearTimeout(timer))
-      if (generation !== this.generation) return null
-      // A call, not an inline comparison: TypeScript keeps the `!== 'running'`
-      // narrowing from above and does not know `resume()` changed the state.
-      if (!resumed || !isRunning(replacement)) {
-        throw new Error(
-          'This browser refused the 16 kHz audio context and would not start a native-rate one ' +
-            'outside a tap. Start capture again; the next attempt uses the native rate.',
-        )
-      }
-    }
-    return { context: replacement, source: replacement.createMediaStreamSource(stream) }
   }
 
   private handleFrames(frame: Float32Array, options: CaptureOptions): void {

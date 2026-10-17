@@ -59,10 +59,9 @@ const RESAMPLER_CUTOFF_RATIO = 0.45
  * 48 kHz (160 taps), 74 at 44.1 kHz, 40 at 24 kHz.
  *
  * Cost: 160 multiply-adds per 16 kHz output, ~2.6 M a second. Measured
- * 2026-10-17 in Node 24 on an Intel i5-8257U under heavy load (load average
- * ~90): ~21 ms per second of 48 kHz audio fed in 128-frame blocks, i.e.
- * ~0.06 ms per 2.7 ms callback, ~2% of one core. The previous linear
- * interpolator was cheaper, and wrong.
+ * 2026-10-17 in Node 24 on an Intel i5-8257U under load (load average ~30):
+ * ~8 ms per second of 48 kHz audio fed in 128-frame blocks, i.e. ~0.02 ms
+ * per 2.7 ms callback, under 1% of one core.
  */
 const RESAMPLER_ZERO_CROSSINGS = 24
 
@@ -87,30 +86,26 @@ const RESAMPLER_MAX_PHASES = 512
  * at the fractional read position (polyphase decimation; Smith's
  * bandlimited-interpolation method).
  *
- * The browser decides the AudioContext sample rate. `capture.ts` asks for
- * 16 kHz so the browser does the (filtered) conversion itself, but that
- * request is not honoured everywhere: iOS is reported to pin 48 kHz, old
- * `webkitAudioContext` takes no options, and Firefox rejects a forced rate that
- * differs from the microphone's, so capture then runs at the hardware rate
- * (44.1 kHz, 48 kHz, 24 kHz on some iOS devices) and this class converts.
+ * The browser decides the AudioContext sample rate (44.1 kHz, 48 kHz, 24 kHz
+ * on some iOS devices) and `capture.ts` deliberately leaves it so (see
+ * `unlockSync`), so every capture path goes through this class.
  *
  * Until 2026-10-17 this was a plain linear interpolator, on the assumption
- * that the path was a rarely-taken fallback. It was the live path: the
- * package spinout had dropped the `sampleRate` request, and Mac Chrome
+ * that the path was a rarely-taken fallback. It was the live path: Mac Chrome
  * diagnostics read `48kHz` on every microphone tried (built-in and a Razer
  * USB mic). Linear interpolation does no anti-alias filtering, so 8–24 kHz
  * energy folds straight into the speech band: an 11 kHz tone came out as a
  * 5 kHz tone at full strength.
  *
- * Whether that aliasing hurts recognition on real speech is not yet known.
- * The one clip available for an A/B on 2026-10-17 was football commentary
- * played through a speaker and re-recorded: band-limited (only ~−45 dB of
- * its energy above 8 kHz) and noisy, so it could not test aliasing either
- * way. The change rests on the offline tone measurements in
- * test/audio.test.ts: it is the correct way to decimate, and it keeps the
- * energy of wideband microphones, sibilants, hiss and fans above 8 kHz out
- * of the band the model listens to. Do not read it as the confirmed fix for
- * bad captions until a direct-mic recording has been compared.
+ * That is a signal-processing defect, not a demonstrated recognition one. On
+ * two real speech clips (one re-recorded through a speaker, one a broadcast
+ * mic) the linear and filtered 16 kHz outputs correlated at 0.9997, and
+ * live-model runs agreed 97–99% within and across versions: speech carries
+ * little energy above 8 kHz. The filter is kept because it is the correct
+ * way to decimate and costs little, and because what speech does not
+ * exercise — wideband microphones, hiss, fans, sibilant-heavy PAs — would
+ * otherwise fold into the band the model listens to. The tone measurements
+ * are pinned in test/audio.test.ts.
  *
  * Each output at input position p is Σ x[k]·h(p − k), with h a windowed sinc
  * cut off at `RESAMPLER_CUTOFF_RATIO` of the lower rate. Evaluating h at the
@@ -125,23 +120,46 @@ const RESAMPLER_MAX_PHASES = 512
  * audio acquires a discontinuity. The filter history (one kernel width of
  * input) and the read position are carried across calls. The position is an
  * exact integer plus a rational remainder, never an accumulated float, so any
- * split of the same input yields bit-identical output. The price is a fixed
- * latency of half a kernel (~1.7 ms at 48 kHz): an output is emitted once the
- * input to its right has arrived.
+ * split of the same input yields bit-identical output.
+ *
+ * Behaviour change from the linear version (2026-10-17), for any host using
+ * this export directly:
+ *   * Latency: an output is emitted only once the half kernel of input to its
+ *     right has arrived — 80 samples (~1.7 ms) at 48 kHz, 74 at 44.1 kHz, 40
+ *     at 24 kHz. The first `process()` call therefore returns fewer samples
+ *     (a 128-frame first block at 48 kHz yields 16, not 43), and a stream's
+ *     final half kernel is only emitted if more input follows. Totals over a
+ *     long stream are unchanged apart from that fixed shortfall.
+ *   * Fade-in: the history starts as zeros, so the first outputs ramp in over
+ *     one half kernel instead of starting at full level.
+ *   * Output is timing-exact: sample n is the input at n × ratio, with no
+ *     one-sample lag (the linear version read one sample behind).
+ * Pass-through (equal rates) is unchanged: an immediate copy, no latency.
+ *
+ * Allocation: the history lives in one buffer reused across calls (grown only
+ * when a larger block arrives) and outputs are computed into a reused
+ * scratch. Each call still returns a fresh, exact-size array — the export is
+ * public, and a view into the scratch would be silently overwritten by the
+ * next call in any host that kept it. That is one small allocation per call
+ * (43 samples per 128-frame block at 48 kHz).
  */
 export class StreamingResampler {
   private readonly passThrough: boolean
   /** Input samples advanced per output, as the exact fraction step / denominator. */
-  private readonly step: number
-  private readonly denominator: number
-  private readonly halfTaps: number
+  private readonly step: number = 1
+  private readonly denominator: number = 1
+  private readonly halfTaps: number = 0
   /** `phases + 1` rows of `2 · halfTaps` taps; row i is fractional offset i / phases. */
-  private readonly phases: number
-  private readonly coefficients: Float32Array
+  private readonly phases: number = 0
+  private readonly coefficients: Float32Array = new Float32Array(0)
 
+  /** Reused input history; `history[0, filled)` is valid. */
+  private history = new Float32Array(0)
+  private filled = 0
   /** Absolute input index of `history[0]`. */
   private historyStart = 0
-  private history = new Float32Array(0)
+  /** Reused output scratch, copied out exact-size on return. */
+  private scratch = new Float32Array(0)
   /** Read position: `index + remainder / denominator`, in absolute input samples. */
   private index = 0
   private remainder = 0
@@ -157,18 +175,20 @@ export class StreamingResampler {
     // one; rounding only guards a host passing 44100.0000001.
     const input = Math.round(inputSampleRate)
     const output = Math.round(outputSampleRate)
+    this.passThrough = input === output
+    // Pass-through needs no kernel, phases or history.
+    if (this.passThrough) return
+
     const divisor = gcd(input, output)
     this.step = input / divisor
     this.denominator = output / divisor
-    this.passThrough = input === output
 
-    // Normalised cutoff: 1 is the input Nyquist.
+    // Normalised cutoff: 1 is the input Nyquist. halfTaps ≥ 26 × the ratio,
+    // so one output never advances the read position past the kept history.
     const cutoff = (2 * RESAMPLER_CUTOFF_RATIO * Math.min(input, output)) / input
     this.halfTaps = Math.ceil(RESAMPLER_ZERO_CROSSINGS / cutoff)
     this.phases = Math.min(this.denominator, RESAMPLER_MAX_PHASES)
-    this.coefficients = this.passThrough
-      ? new Float32Array(0)
-      : buildPolyphase(cutoff, this.halfTaps, this.phases)
+    this.coefficients = buildPolyphase(cutoff, this.halfTaps, this.phases)
     this.reset()
   }
 
@@ -178,15 +198,26 @@ export class StreamingResampler {
     // Pass-through when the context already runs at the target rate.
     if (this.passThrough) return Float32Array.from(input)
 
-    const history = new Float32Array(this.history.length + input.length)
-    history.set(this.history)
-    history.set(input, this.history.length)
-    const end = this.historyStart + history.length
-
     const { halfTaps, coefficients, step, denominator, phases } = this
     const taps = 2 * halfTaps
-    // Upper bound on outputs this call; trimmed to `count` on return.
-    const output = new Float32Array(Math.ceil((input.length * denominator) / step) + 1)
+
+    // History never holds more than 2·halfTaps − 1 kept samples plus this
+    // block, so the buffer grows only when a larger block than any before
+    // arrives — once, in practice, for the fixed 128-frame worklet quantum.
+    const needed = this.filled + input.length
+    if (needed > this.history.length) {
+      const grown = new Float32Array(taps + input.length)
+      grown.set(this.history.subarray(0, this.filled))
+      this.history = grown
+    }
+    const history = this.history
+    history.set(input, this.filled)
+    this.filled = needed
+    const end = this.historyStart + needed
+
+    const bound = Math.ceil((input.length * denominator) / step) + 1
+    if (bound > this.scratch.length) this.scratch = new Float32Array(bound)
+    const output = this.scratch
     let count = 0
 
     // The output at index + fraction reads x[index − halfTaps + 1] through
@@ -212,19 +243,25 @@ export class StreamingResampler {
       this.remainder -= whole * denominator
     }
 
-    // Keep only the history the next output's left edge can still reach.
+    // Keep only the history the next output's left edge can still reach,
+    // moved to the front in place.
     const keepFrom = this.index - halfTaps + 1
-    this.history = history.slice(keepFrom - this.historyStart)
+    const drop = keepFrom - this.historyStart
+    history.copyWithin(0, drop, this.filled)
+    this.filled -= drop
     this.historyStart = keepFrom
 
     return output.slice(0, count)
   }
 
   reset(): void {
+    if (this.passThrough) return
     // Silence before the stream starts: the first outputs see zeros to their
     // left, a half-kernel fade-in rather than a spurious step.
+    this.filled = this.halfTaps - 1
+    if (this.history.length < this.filled) this.history = new Float32Array(2 * this.halfTaps)
+    this.history.fill(0, 0, this.filled)
     this.historyStart = 1 - this.halfTaps
-    this.history = new Float32Array(Math.max(0, this.halfTaps - 1))
     this.index = 0
     this.remainder = 0
   }
