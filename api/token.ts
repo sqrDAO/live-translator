@@ -14,6 +14,7 @@
  */
 
 import { authorize, type Authorization } from './_auth.js'
+import { readSessionContext } from './_context.js'
 import { enVi } from '../src/lang/en-vi.js'
 import { enZh } from '../src/lang/en-zh.js'
 import type { LangTag, LanguagePack } from '../src/lang/types.js'
@@ -42,7 +43,9 @@ export const LANGUAGE_PACKS: Readonly<Record<string, LanguagePack>> = {
 }
 
 /** Vercel parses a JSON body for us; a raw string is still accepted. */
-function parseBody(body: unknown): { pair?: unknown; target?: unknown; speakerLang?: unknown } | null {
+type TokenBody = { pair?: unknown; target?: unknown; speakerLang?: unknown; context?: unknown }
+
+function parseBody(body: unknown): TokenBody | null {
   let parsed = body
   if (typeof parsed === 'string') {
     try {
@@ -52,7 +55,7 @@ function parseBody(body: unknown): { pair?: unknown; target?: unknown; speakerLa
     }
   }
   if (!parsed || typeof parsed !== 'object') return null
-  return parsed as { pair?: unknown; target?: unknown; speakerLang?: unknown }
+  return parsed as TokenBody
 }
 
 function readPack(value: unknown): LanguagePack | null {
@@ -116,6 +119,15 @@ export async function handleTokenRequest(input: {
     return { status: 400, body: { error: `speakerLang must be ${oneOf(languages)}` } }
   }
 
+  // Optional programme context (session title, speakers, names). Read before
+  // the key checks so a malformed one is the caller's 400 on every
+  // deployment, configured or not. Wrong shape is refused, an over-long
+  // name dropped, an over-long title cut at a word — `api/_context.ts` says why.
+  const reading = readSessionContext(body?.context)
+  if (!reading.ok) {
+    return { status: 400, body: { error: reading.error } }
+  }
+
   if (!input.apiKey) {
     // No localhost stub here. That path exists in the reference host so a UI
     // can be built without credentials; a deployed function is never the
@@ -132,8 +144,9 @@ export async function handleTokenRequest(input: {
 
   try {
     // The two engine-owned steps: build the pinned config for this target and
-    // mint a single-use token against it. A host with programme context
-    // (event, speakers, glossary) would assemble and pass it here.
+    // mint a single-use token against it. The context is the operator's,
+    // carried on every mint the page makes — reconnects included, since each
+    // single-use token pins its own copy of the instruction.
     const mint = input.mint ?? mintSessionToken
     const grant = await mint({
       apiKey: input.apiKey,
@@ -141,6 +154,7 @@ export async function handleTokenRequest(input: {
       languages,
       target,
       ...(speakerLang ? { speakerLang } : {}),
+      ...(reading.context ? { context: reading.context } : {}),
     })
     return { status: 200, body: { token: grant.token, sessionConfig: grant.sessionConfig } }
   } catch (error) {

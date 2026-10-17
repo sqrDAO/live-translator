@@ -71,10 +71,21 @@ function nameOf(languages: LanguagePack, lang: LangTag): string {
  * mấy hả?` became "Which day is that?" mid-lamination, where `thứ mấy` is
  * which *sample*.
  *
- * Reaches generated output only. A speaker's own words arrive as the other
- * session's raw `inputAudioTranscription`, which no instruction can touch — so
- * this helps the translated line and cannot fix a mistoned original
- * (caption-translation-quality, defect 1).
+ * It reaches the original line too, for names. This comment used to say the
+ * opposite — that `inputAudioTranscription` is beyond any instruction — and
+ * the probe of 2026-10-17 (`gemini-3.5-live-translate-preview`, one Vietnamese
+ * sentence naming Emiliano Martinez, Lionel Messi and Julián Álvarez) says
+ * otherwise:
+ *
+ *   none                                       → input drops "Martinez" and "Julián Álvarez"
+ *   inputAudioTranscription.customVocabulary   → no change
+ *   inputAudioTranscription.languageCodes      → no change
+ *   `glossary` here                            → every name, in input AND translation
+ *
+ * So the glossary is the one lever on the transcription, and the two
+ * transcription fields stay out of the pinned config. Whether it also fixes a
+ * mistoned ordinary word (caption-translation-quality, defect 1) is unprobed;
+ * assume not.
  *
  * Assembling this context — which event, which speakers, which glossary — is
  * the host's job. The engine only carries it into the instruction.
@@ -112,6 +123,9 @@ function distinct(values: readonly (string | undefined)[]): string[] {
  * Absent context must produce a byte-identical instruction to the one that
  * shipped before this existed: the instruction is pinned into the ephemeral
  * token, so a difference here is a difference in what the token authorizes.
+ * An EMPTY context is not absent: it still adds the hesitation clause, which
+ * is why a host should omit `context` when it has nothing to say
+ * (`api/_context.ts` does).
  */
 function contextClauses(context: LiveSessionContext | undefined): string[] {
   if (!context) return []

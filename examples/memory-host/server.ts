@@ -4,7 +4,8 @@
  * Key in, token out — for a signed-in, approved caller only. "Who may mint"
  * is answered by `api/_auth.ts` (Firebase sign-in, admin-approved requests),
  * shared with the deployed functions so the two cannot disagree. "What
- * programme context primes the model" is still left unanswered here.
+ * programme context primes the model" is the operator's, typed into the page
+ * and bounded by `api/_context.ts` — likewise shared.
  */
 
 import 'dotenv/config'
@@ -21,6 +22,7 @@ import {
 import type { LangTag, LanguagePack } from '@sqrdao/live-translate/server'
 
 import { authorize, handleRequestsRequest, handleSessionRequest } from '../../api/_auth.js'
+import { readSessionContext } from '../../api/_context.js'
 
 const PORT = Number(process.env.PORT ?? 3001)
 const MODEL = process.env.GEMINI_LIVE_MODEL ?? 'gemini-3.5-live-translate-preview'
@@ -91,6 +93,14 @@ app.post('/api/token', async (req, res) => {
   }
   const speakerLang = declared as LangTag | undefined
 
+  // Optional programme context: wrong shape is a 400; an over-long name is
+  // dropped, a title cut at a word (`api/_context.ts`).
+  const reading = readSessionContext(req.body?.context)
+  if (!reading.ok) {
+    res.status(400).json({ error: reading.error })
+    return
+  }
+
   try {
     if (!apiKey) {
       // The localhost-only stub: no key configured, so no real session — but
@@ -105,14 +115,14 @@ app.post('/api/token', async (req, res) => {
     }
 
     // The two engine-owned steps: build the pinned config for this target and
-    // mint a single-use token against it. A real host would assemble
-    // `context` (event, speakers, glossary) here from what it holds.
+    // mint a single-use token against it, with the operator's context if any.
     const grant = await mintSessionToken({
       apiKey,
       model: MODEL,
       languages,
       target,
       ...(speakerLang ? { speakerLang } : {}),
+      ...(reading.context ? { context: reading.context } : {}),
     })
     res.json({ token: grant.token, sessionConfig: grant.sessionConfig })
   } catch (error) {
