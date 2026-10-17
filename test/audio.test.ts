@@ -53,6 +53,80 @@ describe('PCM conversion and resampling', () => {
     expect(Math.abs(whole.length - streamed)).toBeLessThanOrEqual(1)
   })
 
+  it('passes the target rate through untouched', () => {
+    const input = sine(480)
+    expect(new StreamingResampler(TARGET_SAMPLE_RATE).process(input)).toEqual(input)
+  })
+
+  it('emits about a second of output per second of input, at 48k, 44.1k and 24k', () => {
+    // A fixed half-kernel latency (< 2 ms) is the only shortfall; nothing is
+    // dropped or duplicated per block.
+    for (const rate of [48_000, 44_100, 24_000]) {
+      const r = new StreamingResampler(rate)
+      let total = 0
+      for (let i = 0; i < 10; i += 1) total += r.process(tone(rate, 1000, 0.1, i * 0.1)).length
+      expect(total).toBeLessThanOrEqual(TARGET_SAMPLE_RATE)
+      expect(total).toBeGreaterThan(TARGET_SAMPLE_RATE - 32)
+    }
+  })
+
+  it('splits arbitrary blocks without changing a single output sample', () => {
+    // The streaming property, sample for sample: filter history and the read
+    // position carry across calls, so 128-frame worklet blocks, odd-sized
+    // blocks and one big block are bit-identical. 44.1 kHz is the hard case:
+    // its read position never lands on a sample (ratio 2.75625).
+    for (const rate of [48_000, 44_100, 24_000]) {
+      const input = tone(rate, 1234, 0.25)
+      const whole = new StreamingResampler(rate).process(input)
+      const random = mulberry32(rate)
+      const r = new StreamingResampler(rate)
+      const parts: number[] = []
+      for (let at = 0; at < input.length; ) {
+        const size = 1 + Math.floor(random() * 300)
+        parts.push(...r.process(input.subarray(at, at + size)))
+        at += size
+      }
+      expect(Float32Array.from(parts)).toEqual(whole)
+    }
+  })
+
+  it('keeps speech-band tones at unity gain', () => {
+    for (const rate of [48_000, 44_100, 24_000]) {
+      for (const frequency of [300, 1000, 4000, 6000]) {
+        const gain = gainOf(new StreamingResampler(rate), rate, frequency)
+        expect(gain, `${frequency} Hz at ${rate}`).toBeGreaterThan(0.99)
+        expect(gain, `${frequency} Hz at ${rate}`).toBeLessThan(1.01)
+      }
+    }
+  })
+
+  it('removes energy above 8 kHz instead of folding it into the speech band', () => {
+    // 2026-10-17: Mac Chrome captured at 48 kHz on every microphone, so every
+    // chunk went through this class, and the linear interpolator it replaced
+    // folded an 11 kHz tone to 5 kHz at full strength. `linearReference` is
+    // that interpolator, verbatim in behaviour: asserting it fails the same
+    // bound proves this test can tell the two apart.
+    const rate = 48_000
+    const fixed = gainOf(new StreamingResampler(rate), rate, 11_000)
+    const old = gainOf({ process: (x) => linearReference(rate, x) }, rate, 11_000)
+    expect(fixed).toBeLessThan(0.05)
+    expect(old).toBeGreaterThan(0.9)
+    // The measured figure is ~−100 dB; 0.05 (−26 dB) is the bound the issue
+    // asked for, −60 dB the one that keeps a refactor honest.
+    expect(fixed).toBeLessThan(0.001)
+
+    for (const [inputRate, frequency] of [
+      [48_000, 8_800],
+      [48_000, 20_000],
+      [44_100, 11_000],
+      [44_100, 15_000],
+      [24_000, 11_000],
+    ] as const) {
+      const gain = gainOf(new StreamingResampler(inputRate), inputRate, frequency)
+      expect(gain, `${frequency} Hz at ${inputRate}`).toBeLessThan(0.001)
+    }
+  })
+
   it('emits exactly 100 ms chunks', () => {
     expect(SAMPLES_PER_CHUNK).toBe(1600)
     const accumulator = new ChunkAccumulator()
@@ -66,6 +140,46 @@ function sine(length: number, offset = 0): Float32Array {
   const out = new Float32Array(length)
   for (let i = 0; i < length; i += 1) out[i] = Math.sin((i + offset) / 20)
   return out
+}
+
+function tone(rate: number, frequency: number, seconds: number, startSeconds = 0): Float32Array {
+  const out = new Float32Array(Math.round(rate * seconds))
+  const start = Math.round(rate * startSeconds)
+  for (let i = 0; i < out.length; i += 1) {
+    out[i] = Math.sin((2 * Math.PI * frequency * (start + i)) / rate)
+  }
+  return out
+}
+
+/** RMS out / RMS in for one second of a pure tone, skipping the fade-in. */
+function gainOf(
+  resampler: { process: (input: Float32Array) => Float32Array },
+  rate: number,
+  frequency: number,
+): number {
+  const input = tone(rate, frequency, 1)
+  const output = resampler.process(input)
+  const settle = 200 // > half a kernel at 16 kHz
+  return (
+    VoiceActivityDetector.rms(output, settle) /
+    VoiceActivityDetector.rms(input, Math.round((settle * rate) / TARGET_SAMPLE_RATE))
+  )
+}
+
+/**
+ * The pre-2026-10-17 `StreamingResampler` for a single block: linear
+ * interpolation between the two samples around each read position, no
+ * low-pass. Kept only so the aliasing test can show it would fail.
+ */
+function linearReference(rate: number, input: Float32Array): Float32Array {
+  const ratio = rate / TARGET_SAMPLE_RATE
+  const out: number[] = []
+  for (let position = 0; position < input.length; position += ratio) {
+    const index = Math.floor(position)
+    const previous = index === 0 ? input[0]! : input[index - 1]!
+    out.push(previous + (input[index]! - previous) * (position - index))
+  }
+  return Float32Array.from(out)
 }
 
 function speechFrame(): Float32Array {

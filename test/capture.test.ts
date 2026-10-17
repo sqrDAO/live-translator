@@ -257,3 +257,117 @@ describe('the remembered microphone records a choice, never a coincidence', () =
     expect(store.size).toBe(0)
   })
 })
+
+/**
+ * The context rate request (fix/capture-anti-alias). Each test imports a
+ * fresh module: `forcedRateRejected` is page-wide state by design, and a
+ * Firefox-style refusal in one test must not leak into the next.
+ */
+describe('the capture context asks for 16 kHz and survives a browser that refuses', () => {
+  async function freshCapture(): Promise<AudioCapture> {
+    vi.resetModules()
+    const module = await import('../src/audio/capture')
+    return new module.AudioCapture()
+  }
+
+  function installContext(Ctor: unknown): void {
+    installBrowserGlobals(async () => fakeStream('mic'))
+    vi.stubGlobal('window', {
+      AudioContext: Ctor,
+      localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    })
+  }
+
+  it('requests the target rate synchronously inside unlockSync', async () => {
+    const requested: unknown[] = []
+    class RecordingContext extends FakeAudioContext {
+      constructor(options?: { sampleRate?: number }) {
+        super()
+        requested.push(options)
+        if (options?.sampleRate) this.sampleRate = options.sampleRate
+      }
+    }
+    installContext(RecordingContext)
+
+    const capture = await freshCapture()
+    // No await between the call and the check: the gesture rule.
+    expect(capture.unlockSync().sampleRate).toBe(16_000)
+    expect(requested).toEqual([{ sampleRate: 16_000 }])
+  })
+
+  it('falls back to the bare constructor when the options form throws', async () => {
+    // Legacy webkitAudioContext takes no options.
+    const requested: unknown[] = []
+    class LegacyContext extends FakeAudioContext {
+      constructor(options?: unknown) {
+        if (options !== undefined) throw new TypeError('no options')
+        super()
+        requested.push(options)
+      }
+    }
+    installContext(LegacyContext)
+
+    const capture = await freshCapture()
+    expect(capture.unlockSync().sampleRate).toBe(48_000)
+    expect(requested).toEqual([undefined])
+  })
+
+  it('swaps to a native-rate context when the microphone will not connect (Firefox)', async () => {
+    const contexts: FirefoxContext[] = []
+    class FirefoxContext extends FakeAudioContext {
+      modules = 0
+      override audioWorklet = {
+        addModule: () => {
+          this.modules += 1
+          return new Promise<void>(() => {})
+        },
+      }
+      constructor(options?: { sampleRate?: number }) {
+        super()
+        if (options?.sampleRate) this.sampleRate = options.sampleRate
+        contexts.push(this)
+      }
+      override createMediaStreamSource(): unknown {
+        // Firefox: the microphone runs at 48 kHz and will not cross rates.
+        if (this.sampleRate !== 48_000) {
+          throw Object.assign(new Error('different sample-rate'), { name: 'NotSupportedError' })
+        }
+        return { connect: () => {} }
+      }
+    }
+    installContext(FirefoxContext)
+
+    const errors: Error[] = []
+    const capture = await freshCapture()
+    void capture.start({ ...options(), onError: (e) => errors.push(e) })
+    await settle()
+
+    expect(errors).toEqual([])
+    expect(contexts.map((c) => c.sampleRate)).toEqual([16_000, 48_000])
+    expect(contexts[0]!.state).toBe('closed')
+    // The worklet is loaded into the context that survives, not the discarded one.
+    expect(contexts.map((c) => c.modules)).toEqual([0, 1])
+    expect(capture.currentDiagnostics.contextSampleRate).toBe(48_000)
+
+    // Remembered: the next start builds the native-rate context in the tap.
+    await capture.stop()
+    capture.unlockSync()
+    expect(contexts.map((c) => c.sampleRate)).toEqual([16_000, 48_000, 48_000])
+  })
+
+  it('rethrows a source failure that the rate swap cannot explain', async () => {
+    class BrokenContext extends FakeAudioContext {
+      override createMediaStreamSource(): unknown {
+        throw Object.assign(new Error('boom'), { name: 'InvalidStateError' })
+      }
+    }
+    installContext(BrokenContext)
+
+    const errors: Error[] = []
+    const capture = await freshCapture()
+    void capture.start({ ...options(), onError: (e) => errors.push(e) })
+    await settle()
+
+    expect(errors.map((e) => e.message)).toEqual(['boom'])
+  })
+})
