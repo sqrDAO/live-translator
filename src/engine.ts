@@ -278,6 +278,7 @@ export class LiveTranslateEngine<G extends TokenGrant = TokenGrant> {
       pair: this.pair,
       detect: options.languages.detect,
       ...(options.languages.detectOutput ? { detectOutput: options.languages.detectOutput } : {}),
+      ...(options.languages.fillerWords ? { fillerWords: options.languages.fillerWords } : {}),
       allowSourceOnly: options.allowSourceOnly ?? false,
       ...(options.forcedSourceLang ? { forcedSourceLang: options.forcedSourceLang } : {}),
       maxUtteranceSentences: MAX_UTTERANCE_SENTENCES,

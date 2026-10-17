@@ -98,4 +98,5 @@ export {
   type UtteranceMergerOptions,
 } from './transcript/merge.js'
 export { PublicationOutbox, type PublicationOutboxOptions } from './transcript/outbox.js'
+export { collapseStutter } from './transcript/stutter.js'
 export { WriteThrottle, type ThrottleOptions } from './transcript/throttle.js'

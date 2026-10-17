@@ -54,6 +54,13 @@ export interface LanguagePack {
    */
   readonly detectOutput?: LanguageDetector
   readonly instructionClauses?: readonly string[]
+  /**
+   * Per language, the words whose doubling is a stutter rather than grammar
+   * ("cái cái", "the the"), lower-case and NFC. A run of three of any word is
+   * collapsed regardless; this list decides pairs (see
+   * `transcript/stutter.ts`). Absent, no pair is collapsed.
+   */
+  readonly fillerWords?: Readonly<Record<LangTag, readonly string[]>>
 }
 
 /** The other member of the pair. Throws on a tag outside the pair. */

@@ -56,6 +56,7 @@ export interface TargetTurnCoordinatorOptions {
   pair: LanguagePair
   detect: LanguageDetector
   detectOutput?: LanguageDetector
+  fillerWords?: Readonly<Record<LangTag, readonly string[]>>
   forcedSourceLang?: LangTag
   allowSourceOnly?: boolean
   /**
@@ -97,6 +98,7 @@ export class TargetTurnCoordinator {
       pair: options.pair,
       detect: options.detect,
       ...(options.detectOutput ? { detectOutput: options.detectOutput } : {}),
+      ...(options.fillerWords ? { fillerWords: options.fillerWords } : {}),
       allowSourceOnly: options.allowSourceOnly ?? false,
       ...(options.forcedSourceLang ? { forcedSourceLang: options.forcedSourceLang } : {}),
     })

@@ -7,7 +7,7 @@ import { ZH, SIMPLIFIED_CLAUSE, isHanDominant, withoutHan } from './chinese.js'
 import { EN_STOPWORDS, tokenize } from './english.js'
 import { detectOutputLanguage } from './en-vi.js'
 import type { LangTag, LanguagePack } from './types.js'
-import { VI, VI_LETTERS } from './vietnamese.js'
+import { VI, VI_FILLERS, VI_LETTERS } from './vietnamese.js'
 
 export { VI, ZH }
 
@@ -56,4 +56,5 @@ export const viZh: LanguagePack = {
   detect: detectViZh,
   detectOutput: detectOutputLanguage,
   instructionClauses: ['Preserve Vietnamese diacritics exactly.', SIMPLIFIED_CLAUSE],
+  fillerWords: { [VI]: VI_FILLERS },
 }

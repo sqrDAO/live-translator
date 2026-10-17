@@ -70,3 +70,10 @@ export function tokenize(text: string): string[] {
     .split(/\s+/)
     .filter(Boolean)
 }
+
+/**
+ * English words whose doubling is a stutter, never grammar: "the the",
+ * "a a". Hesitation sounds are included because the translating session
+ * renders a Vietnamese "ờ, ờ" as "uh, uh".
+ */
+export const EN_FILLERS: readonly string[] = ['the', 'a', 'an', 'uh', 'um', 'er']

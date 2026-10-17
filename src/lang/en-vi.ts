@@ -9,9 +9,9 @@
  */
 
 import { ZH, isHanDominant } from './chinese.js'
-import { EN, EN_MORPHOLOGY, EN_STOPWORDS, tokenize } from './english.js'
+import { EN, EN_FILLERS, EN_MORPHOLOGY, EN_STOPWORDS, tokenize } from './english.js'
 import type { LangTag, LanguagePack } from './types.js'
-import { VI, VI_LETTERS, isVietnameseSyllable } from './vietnamese.js'
+import { VI, VI_FILLERS, VI_LETTERS, isVietnameseSyllable } from './vietnamese.js'
 
 export { EN, VI }
 
@@ -91,4 +91,5 @@ export const enVi: LanguagePack = {
   detect: detectEnVi,
   detectOutput: detectOutputLanguage,
   instructionClauses: ['Preserve Vietnamese diacritics exactly.'],
+  fillerWords: { [EN]: EN_FILLERS, [VI]: VI_FILLERS },
 }

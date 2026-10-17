@@ -4,7 +4,7 @@
  */
 
 import { ZH, SIMPLIFIED_CLAUSE, isHanDominant, withoutHan } from './chinese.js'
-import { EN, EN_MORPHOLOGY, EN_STOPWORDS, tokenize } from './english.js'
+import { EN, EN_FILLERS, EN_MORPHOLOGY, EN_STOPWORDS, tokenize } from './english.js'
 import { detectOutputLanguage } from './en-vi.js'
 import type { LangTag, LanguagePack } from './types.js'
 
@@ -41,4 +41,5 @@ export const enZh: LanguagePack = {
   detect: detectEnZh,
   detectOutput: detectOutputLanguage,
   instructionClauses: [SIMPLIFIED_CLAUSE],
+  fillerWords: { [EN]: EN_FILLERS },
 }
