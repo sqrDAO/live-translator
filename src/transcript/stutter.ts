@@ -19,8 +19,9 @@
  *
  * Words in a run may be separated by whitespace and commas — the model writes
  * a stutter both ways — but never by a sentence boundary, so "Go. Go. Go."
- * is three sentences, not a stutter. Han text has no spaces between words and
- * is left exactly as it is.
+ * is three sentences, not a stutter. Han text is written without spaces, so a
+ * Han run reads as one word and an unspaced "我我我" is left as it is; the
+ * same characters spaced out ("我 我 我") are three words and collapse.
  */
 
 /** A word: letters with their combining marks and inner apostrophes. */

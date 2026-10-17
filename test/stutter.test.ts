@@ -47,8 +47,9 @@ describe('collapseStutter', () => {
     expect(collapseStutter('Go. Go. Go.')).toBe('Go. Go. Go.')
   })
 
-  it('leaves Han text and short input untouched', () => {
+  it('leaves unspaced Han text and short input untouched', () => {
     expect(collapseStutter('我我我觉得')).toBe('我我我觉得')
+    expect(collapseStutter('我 我 我 觉得')).toBe('我 觉得')
     expect(collapseStutter('cái', VI)).toBe('cái')
     expect(collapseStutter('')).toBe('')
   })
