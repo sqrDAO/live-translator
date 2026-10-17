@@ -17,5 +17,14 @@ export default defineConfig({
   },
   server: {
     proxy: { '/api': 'http://localhost:3001' },
+    // The page imports `api/_context.ts` by relative path so the panel can run
+    // the server's own reader. Alias targets are allowed automatically; a
+    // relative import outside this folder is not, and the dev server answers
+    // it with 403 (the production build has no such check, so CI passes).
+    // Only the folders the page actually reads from, never the repo root, which
+    // holds the `.env` with the API key.
+    fs: {
+      allow: ['.', '../../src', '../../api'].map((dir) => fileURLToPath(new URL(dir, import.meta.url))),
+    },
   },
 })
