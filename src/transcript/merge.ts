@@ -23,6 +23,7 @@
 
 import type { LangTag, LanguageDetector, LanguagePair } from '../lang/types.js'
 import { otherOf } from '../lang/types.js'
+import { collapseStutter } from './stutter.js'
 
 export interface IncomingFragment {
   utteranceId: string
@@ -259,6 +260,8 @@ export interface UtteranceMergerOptions {
   detect: LanguageDetector
   /** Translation classifier that may answer outside the pair; see `LanguagePack.detectOutput`. */
   detectOutput?: LanguageDetector
+  /** Per-language stutter fillers; see `LanguagePack.fillerWords`. */
+  fillerWords?: Readonly<Record<LangTag, readonly string[]>>
   /** Fragments shorter than this are treated as phantom noise. */
   minCharacters?: number
   /** Permit recognized source text before translation; empty translated means pending/missing. */
@@ -280,6 +283,7 @@ export class UtteranceMerger {
   private readonly startedAt = new Map<string, number>()
   private readonly pair: LanguagePair
   private readonly detect: LanguageDetector
+  private readonly fillers = new Map<LangTag, ReadonlySet<string>>()
 
   /**
    * Drops every accumulated fragment. A stopped feed's half-heard speech is
@@ -293,6 +297,7 @@ export class UtteranceMerger {
   constructor(private readonly options: UtteranceMergerOptions) {
     this.pair = options.pair
     this.detect = options.detect
+    for (const lang of this.pair) this.fillers.set(lang, new Set(options.fillerWords?.[lang] ?? []))
     if (options.forcedSourceLang !== undefined) otherOf(this.pair, options.forcedSourceLang)
   }
 
@@ -362,7 +367,7 @@ export class UtteranceMerger {
     const target = otherOf(this.pair, sourceLang)
     const translating = byTarget.get(target)
     const sourceSession = byTarget.get(sourceLang)
-    const original = collapse(translating?.original || sourceSession?.original || '')
+    const original = this.tidy(translating?.original || sourceSession?.original || '', sourceLang)
 
     // Prefer the translating session's output. When it is missing or reads as
     // the source language itself (an echo), a source-target session that
@@ -374,11 +379,11 @@ export class UtteranceMerger {
       const lang = this.options.detectOutput?.(text) ?? null
       return lang !== null && lang !== target
     }
-    let translated = collapse(translating?.translated ?? '')
+    let translated = this.tidy(translating?.translated ?? '', target)
     if (!translated || this.detect(translated) === sourceLang || offTarget(translated)) {
       const flipped =
         sourceSession && !isPassthrough(sourceSession.original, sourceSession.translated)
-          ? collapse(sourceSession.translated)
+          ? this.tidy(sourceSession.translated, target)
           : ''
       if (flipped && this.detect(flipped) !== sourceLang && !offTarget(flipped)) translated = flipped
     }
@@ -424,6 +429,14 @@ export class UtteranceMerger {
       startedAt: this.startedAt.get(utteranceId) ?? fragments[0]!.receivedAt,
       updatedAt: Math.max(...fragments.map((f) => f.receivedAt)),
     }
+  }
+
+  /**
+   * Whitespace, then stutter (collapse-stutter). Applied to the accumulated
+   * text on every build, never to a delta: a run can straddle two fragments.
+   */
+  private tidy(text: string, lang: LangTag): string {
+    return collapseStutter(collapse(text), this.fillers.get(lang))
   }
 
   release(utteranceId: string): void {

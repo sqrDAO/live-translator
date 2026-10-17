@@ -40,3 +40,12 @@ const VI_SYLLABLE = new RegExp(
 export function isVietnameseSyllable(token: string): boolean {
   return VI_SYLLABLE.test(token)
 }
+
+/**
+ * Vietnamese words whose doubling is a stutter rather than reduplication.
+ * "cái cái" is a classifier restarted mid-phrase (the 2026-10-17 sample:
+ * "những cái cái giám sát"); "thì thì" a hedge restarted; the rest are
+ * hesitation sounds. Content words stay off this list — "từ từ" and "đi đi"
+ * mean something doubled.
+ */
+export const VI_FILLERS: readonly string[] = ['cái', 'thì', 'ờ', 'ừ', 'à', 'ơ']
