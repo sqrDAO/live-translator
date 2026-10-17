@@ -7,13 +7,22 @@
  * with one, every name survived in both lines. The engine had the plumbing all
  * along; nothing upstream of the mint knew the names. The operator does.
  *
- * Stored as the raw text of the three fields, not the parsed lists, so a
- * reload gives back exactly what was typed — blank lines and all. The server
- * (`api/_context.ts`) is the bound: it trims, strips controls and truncates
- * to the limits the help text prints, so this side only splits.
+ * Normalisation happens once, on the server (`api/_context.ts`): trimming,
+ * blanks, repeats, comma splitting, length and count limits. This side only
+ * splits the textareas into lines and sends them, so no name is lost here
+ * before those rules apply. The panel's summary runs the SAME reader to say
+ * what will actually be used — imported, not re-implemented, so the two
+ * cannot drift (review of 2026-10-17).
+ *
+ * Stored as the raw text of the three fields, so a reload gives back exactly
+ * what was typed.
  */
 
 import type { LiveSessionContext } from '@sqrdao/live-translate'
+
+import { CONTEXT_LIMITS, readSessionContext } from '../../../api/_context'
+
+export { CONTEXT_LIMITS }
 
 export const SESSION_DETAILS_STORAGE_KEY = 'live-translate:session-details'
 
@@ -21,7 +30,7 @@ export interface SessionDetails {
   title: string
   /** One speaker per line. */
   speakers: string
-  /** One name or term per line, or comma-separated. */
+  /** One name or term per line, or comma-separated (the server splits commas). */
   glossary: string
 }
 
@@ -50,36 +59,50 @@ export function saveDetails(storage: () => DetailsStorage, details: SessionDetai
   }
 }
 
-const lines = (text: string) => text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
-
 /**
- * The `context` to send, or `null` when every field is blank.
- *
- * Speakers split on lines only — "Name — Affiliation, Title" is one speaker.
- * Names split on lines AND commas (ASCII and the CJK `，` / `、`), because a
- * pasted glossary is as often a comma list as a column.
+ * The `context` to send: the fields as typed, the lists split into lines and
+ * nothing else. `null` only when every field is whitespace, which the server
+ * would reduce to "no context" anyway — this just keeps the request clean.
  */
 export function detailsContext(details: SessionDetails): LiveSessionContext | null {
-  const sessionTitle = details.title.trim()
-  const speakers = lines(details.speakers)
-  const glossary = details.glossary
-    .split(/[\r\n,，、]+/)
-    .map((term) => term.trim())
-    .filter(Boolean)
-  const context: LiveSessionContext = {
-    ...(sessionTitle ? { sessionTitle } : {}),
-    ...(speakers.length > 0 ? { speakers } : {}),
-    ...(glossary.length > 0 ? { glossary } : {}),
+  if (!details.title.trim() && !details.speakers.trim() && !details.glossary.trim()) return null
+  return {
+    sessionTitle: details.title,
+    speakers: details.speakers.split(/\r?\n/),
+    glossary: details.glossary.split(/\r?\n/),
   }
-  return Object.keys(context).length > 0 ? context : null
 }
 
-/** The collapsed summary's tail: what is set, so a closed panel still says so. */
-export function detailsSummary(context: LiveSessionContext | null): string {
-  if (!context) return 'none'
+/**
+ * The collapsed summary's tail: what the server will use, from its own
+ * reader, and how many entries it will not (too long, or past the count).
+ */
+export function detailsSummary(details: SessionDetails): string {
+  const reading = readSessionContext(detailsContext(details))
+  // The textareas only make strings, so the one refusal they can reach is a
+  // paste past `CONTEXT_CEILING` — which would fail the mint, so say so here.
+  if (!reading.ok) return 'too long to send, shorten the lists'
+  if (!reading.context && !reading.dropped.speakers && !reading.dropped.glossary) return 'none'
+  const { sessionTitle, speakers, glossary } = reading.context ?? {}
+  const count = (n: number, one: string, many: string, dropped: number) =>
+    `${n} ${n === 1 ? one : many}${dropped > 0 ? ` (${dropped} not used)` : ''}`
   const parts: string[] = []
-  if (context.sessionTitle) parts.push('title')
-  if (context.speakers) parts.push(`${context.speakers.length} ${context.speakers.length === 1 ? 'speaker' : 'speakers'}`)
-  if (context.glossary) parts.push(`${context.glossary.length} ${context.glossary.length === 1 ? 'name' : 'names'}`)
+  if (sessionTitle) parts.push('title')
+  if (speakers || reading.dropped.speakers) {
+    parts.push(count(speakers?.length ?? 0, 'speaker', 'speakers', reading.dropped.speakers))
+  }
+  if (glossary || reading.dropped.glossary) {
+    parts.push(count(glossary?.length ?? 0, 'name', 'names', reading.dropped.glossary))
+  }
   return parts.join(' · ')
+}
+
+/** The help text's limits, from the same constants the server enforces. */
+export function limitsText(): string {
+  const l = CONTEXT_LIMITS
+  return (
+    `Up to ${l.speakers} speakers (${l.speaker} characters each) and ${l.glossary} names ` +
+    `(${l.term} characters each); a longer name is skipped, not shortened, and entries past ` +
+    `the limit are not used. Titles over ${l.title} characters are shortened.`
+  )
 }

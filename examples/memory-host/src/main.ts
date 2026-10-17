@@ -9,7 +9,6 @@ import {
   type LatencyReport,
   type LiveSessionContext,
   type MintToken,
-  type TokenGrant,
 } from '@sqrdao/live-translate'
 import { enVi } from '@sqrdao/live-translate/lang/en-vi'
 import { enZh } from '@sqrdao/live-translate/lang/en-zh'
@@ -36,8 +35,16 @@ import {
   type AuthState,
 } from './auth'
 import { MemorySink, type StoredUtterance } from './memory-sink'
-import { detailsContext, detailsSummary, saveDetails, storedDetails } from './session-details'
+import {
+  detailsContext,
+  detailsSummary,
+  limitsText,
+  saveDetails,
+  storedDetails,
+  type SessionDetails,
+} from './session-details'
 import { bindThemeToggle } from './theme'
+import { createMintToken } from './token-client'
 import { TranscriptHistory, TranscriptArchive, TRANSCRIPT_PREFIX, TRANSCRIPT_DELETE_PREFIX, transcriptText, type TranscriptRecorder, type TranscriptSession } from './transcript-history'
 
 /** The pairs the token endpoint accepts, by the id sent as `pair`. */
@@ -77,52 +84,23 @@ let pairId = rememberedPair()
 let speakerLang: LangTag | null = null
 
 /**
- * The programme context this run's tokens carry, snapshotted at `start()`.
- *
- * A snapshot, not a live read of the fields: the engine re-mints on every
- * reconnect, and a feed whose reconnects picked up a half-typed edit would
- * have its two sessions pinned to different instructions. Edits wait for the
- * next start, and the help text says so.
+ * The engine's mint hook for one run, with that run's pair, direction and
+ * session details fixed in (see `token-client.ts` for why per engine). Edits
+ * to the details wait for the next start, and the help text says so.
  */
-let runContext: LiveSessionContext | null = null
-
-/**
- * The host's authorization hook. The engine calls it once per target at
- * start and again on every reconnect (tokens are single-use). It hits the
- * host's own endpoint; the API key never reaches this code.
- */
-const mintToken: MintToken = async (target): Promise<TokenGrant> => {
-  // Fetched per mint: Firebase refreshes it near its one-hour expiry, so a
-  // reconnect late in a long feed still presents a current one.
-  const bearer = await idToken()
-  const response = await fetch('/api/token', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
-    // The declared direction travels with every mint, including the ones the
-    // engine makes on reconnect: the session prompt is pinned into the token,
-    // so a reconnect that forgot it would silently return that half of the
-    // feed to Auto mid-session. The context rides along for the same reason:
-    // a reconnect without it would quietly lose the glossary.
-    body: JSON.stringify({
-      pair: pairId,
-      target,
-      ...(speakerLang ? { speakerLang } : {}),
-      ...(runContext ? { context: runContext } : {}),
-    }),
-  })
-  if (!response.ok) {
-    // Signed out elsewhere, or access withdrawn since sign-in: no reconnect
-    // will succeed, so send the person back to the gate rather than leaving a
-    // dead feed that reads "mất kết nối".
-    if (response.status === 401 || response.status === 403) {
-      void recheck().then(showAuth, showAuthError)
-    }
-    const detail = await response.text().catch(() => '')
-    throw new Error(`token endpoint HTTP ${response.status} ${detail}`.trim())
-  }
-  const { token, sessionConfig } = (await response.json()) as TokenGrant
-  if (!token) throw new Error('token endpoint returned no token')
-  return { token, sessionConfig: sessionConfig ?? {} }
+function mintTokenForRun(): MintToken {
+  return createMintToken(
+    { pair: pairId, speakerLang, context: currentDetailsContext() },
+    {
+      fetch: (url, init) => fetch(url, init),
+      // Fetched per mint: Firebase refreshes it near its one-hour expiry, so a
+      // reconnect late in a long feed still presents a current one.
+      bearer: idToken,
+      // Send the person back to the gate rather than leaving a dead feed that
+      // reads "mất kết nối".
+      onUnauthorized: () => void recheck().then(showAuth, showAuthError),
+    },
+  )
 }
 
 // --- DOM ---------------------------------------------------------------------
@@ -500,7 +478,6 @@ function start(): void {
   // utterance; with a declared direction it is told, and so is the model.
   wire = freshWire()
   lastLatency = null
-  runContext = currentDetailsContext()
   const runRecorder = archive.begin(speakerLang)
   recorder = runRecorder
   const sink = new MemorySink({
@@ -522,7 +499,7 @@ function start(): void {
     partialSegmentIntervalMs: 100,
     onLatency: (report) => { lastLatency = report; paint() },
     sink,
-    mintToken,
+    mintToken: mintTokenForRun(),
     createSocket,
     // Fixed for this engine's lifetime, which is why changing it restarts.
     ...(speakerLang ? { forcedSourceLang: speakerLang } : {}),
@@ -634,29 +611,47 @@ buildDirectionButtons()
 renderDirection()
 
 // --- Session details ---------------------------------------------------------
-// Saved on every keystroke, read at start (see `runContext`).
+// Read when each engine is built (`mintTokenForRun`), so edits apply on the
+// next start. The help text's limits come from the server's own constants.
 const detailsTitle = $<HTMLInputElement>('#details-title')
 const detailsSpeakers = $<HTMLTextAreaElement>('#details-speakers')
 const detailsGlossary = $<HTMLTextAreaElement>('#details-glossary')
 const detailsState = $('#details-state')
+$('#details-limits').textContent = limitsText()
+
+function currentDetails(): SessionDetails {
+  return { title: detailsTitle.value, speakers: detailsSpeakers.value, glossary: detailsGlossary.value }
+}
 
 function currentDetailsContext(): LiveSessionContext | null {
-  return detailsContext({ title: detailsTitle.value, speakers: detailsSpeakers.value, glossary: detailsGlossary.value })
+  return detailsContext(currentDetails())
 }
 
 const remembered = storedDetails(() => window.localStorage)
 detailsTitle.value = remembered.title
 detailsSpeakers.value = remembered.speakers
 detailsGlossary.value = remembered.glossary
-detailsState.textContent = detailsSummary(currentDetailsContext())
+detailsState.textContent = detailsSummary(remembered)
 
-$('#session-details').addEventListener('input', () => {
-  saveDetails(() => window.localStorage, {
-    title: detailsTitle.value,
-    speakers: detailsSpeakers.value,
-    glossary: detailsGlossary.value,
-  })
-  detailsState.textContent = detailsSummary(currentDetailsContext())
+// Saved 300 ms after typing stops rather than per keystroke: a JSON
+// stringify and a synchronous storage write on every key is wasted work on a
+// slow phone mid-event. `change` (blur) and `pagehide` flush at once, so
+// nothing typed is lost to a quick reload.
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+function flushDetails(): void {
+  if (saveTimer !== null) clearTimeout(saveTimer)
+  saveTimer = null
+  saveDetails(() => window.localStorage, currentDetails())
+}
+const detailsPanel = $('#session-details')
+detailsPanel.addEventListener('input', () => {
+  detailsState.textContent = detailsSummary(currentDetails())
+  if (saveTimer !== null) clearTimeout(saveTimer)
+  saveTimer = setTimeout(flushDetails, 300)
+})
+detailsPanel.addEventListener('change', flushDetails)
+window.addEventListener('pagehide', () => {
+  if (saveTimer !== null) flushDetails()
 })
 
 // --- Sign-in -----------------------------------------------------------------

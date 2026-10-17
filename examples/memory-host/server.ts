@@ -93,7 +93,8 @@ app.post('/api/token', async (req, res) => {
   }
   const speakerLang = declared as LangTag | undefined
 
-  // Optional programme context: over-long is truncated, wrong-shaped is a 400.
+  // Optional programme context: wrong shape is a 400; an over-long name is
+  // dropped, a title cut at a word (`api/_context.ts`).
   const reading = readSessionContext(req.body?.context)
   if (!reading.ok) {
     res.status(400).json({ error: reading.error })

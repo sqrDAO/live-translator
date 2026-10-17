@@ -121,8 +121,8 @@ export async function handleTokenRequest(input: {
 
   // Optional programme context (session title, speakers, names). Read before
   // the key checks so a malformed one is the caller's 400 on every
-  // deployment, configured or not. Over-long is truncated, wrong-shaped is
-  // refused — see `api/_context.ts` for why each.
+  // deployment, configured or not. Wrong shape is refused, an over-long
+  // name dropped, an over-long title cut at a word — `api/_context.ts` says why.
   const reading = readSessionContext(body?.context)
   if (!reading.ok) {
     return { status: 400, body: { error: reading.error } }

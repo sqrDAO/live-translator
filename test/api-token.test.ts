@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { CONTEXT_LIMITS } from '../api/_context'
+import { CONTEXT_CEILING, CONTEXT_LIMITS } from '../api/_context'
 import handlerModule, { handleTokenRequest } from '../api/token'
 import { buildLiveSessionConfig } from '../src/gemini/config'
 import type { MintSessionTokenInput, SessionTokenGrant } from '../src/server/token'
@@ -269,32 +269,79 @@ describe('api/token — programme context', () => {
     expect(instruction(0)).not.toContain('hesitate')
   })
 
-  it('strips control and bidi-override characters', async () => {
-    const { mint, calls } = stubMint()
-    const context = { sessionTitle: 'A\u0000B\u202Eevil\u202C\u2028C', glossary: ['x\u200By'] }
-    expect((await handleTokenRequest({ ...ok, body: { target: 'vi', context }, mint })).status).toBe(200)
-    expect(calls[0]!.context).toEqual({ sessionTitle: 'A B evil C', glossary: ['x y'] })
-  })
-
-  it('truncates over-long fields and lists to the documented limits', async () => {
+  it('turns line-breaking controls into spaces and removes invisible format characters', async () => {
     const { mint, calls } = stubMint()
     const context = {
-      sessionTitle: 'T'.repeat(500),
-      eventName: 'E'.repeat(500),
-      speakers: Array.from({ length: 30 }, (_, i) => `Speaker ${i} `.padEnd(300, 's')),
-      glossary: Array.from({ length: 200 }, (_, i) => `Term ${i} `.padEnd(300, 'g')),
+      sessionTitle: 'A\u{0000}B\u{202E}evil\u{202C}\u{2028}C',
+      // Soft hyphen, word joiner, invisible separator, Arabic letter mark,
+      // zero-width space — each inside a name, which must come out whole.
+      glossary: ['Ál\u{00AD}varez', 'Mes\u{2060}si', 'Mar\u{2063}tinez', 'Ju\u{061C}lián', 'x\u{200B}y'],
+    }
+    expect((await handleTokenRequest({ ...ok, body: { target: 'vi', context }, mint })).status).toBe(200)
+    expect(calls[0]!.context).toEqual({
+      sessionTitle: 'A Bevil C',
+      glossary: ['Álvarez', 'Messi', 'Martinez', 'Julián', 'xy'],
+    })
+  })
+
+  it('drops an over-long name rather than cutting it, and keeps the first entries past the count', async () => {
+    const { mint, calls } = stubMint()
+    const long = (n: number, fill: string) => fill.repeat(n)
+    const context = {
+      speakers: ['Lionel Messi', long(CONTEXT_LIMITS.speaker + 1, 's'), ...Array.from({ length: 30 }, (_, i) => `Speaker ${i}`)],
+      glossary: [long(CONTEXT_LIMITS.term, 'g'), long(CONTEXT_LIMITS.term + 1, 'h'), ...Array.from({ length: 200 }, (_, i) => `Term ${i}`)],
     }
     expect((await handleTokenRequest({ ...ok, body: { target: 'vi', context }, mint })).status).toBe(200)
 
     const got = calls[0]!.context!
-    expect(got.sessionTitle).toHaveLength(CONTEXT_LIMITS.title)
-    expect(got.eventName).toHaveLength(CONTEXT_LIMITS.title)
     expect(got.speakers).toHaveLength(CONTEXT_LIMITS.speakers)
     expect(got.glossary).toHaveLength(CONTEXT_LIMITS.glossary)
-    for (const s of got.speakers!) expect(s.length).toBeLessThanOrEqual(CONTEXT_LIMITS.speaker)
-    for (const g of got.glossary!) expect(g.length).toBeLessThanOrEqual(CONTEXT_LIMITS.term)
-    // The first entries are the ones kept.
-    expect(got.glossary![0]).toMatch(/^Term 0 /)
+    // Exactly at the limit is kept; one past it is gone, not shortened.
+    expect(got.glossary![0]).toBe(long(CONTEXT_LIMITS.term, 'g'))
+    expect(got.glossary![1]).toBe('Term 0')
+    expect(got.glossary!.some((g) => g.startsWith('h'))).toBe(false)
+    expect(got.speakers!.slice(0, 2)).toEqual(['Lionel Messi', 'Speaker 0'])
+  })
+
+  it('cuts an over-long title at a word boundary', async () => {
+    const { mint, calls } = stubMint()
+    const words = Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ')
+    const context = { sessionTitle: words, eventName: words }
+    expect((await handleTokenRequest({ ...ok, body: { target: 'vi', context }, mint })).status).toBe(200)
+
+    const got = calls[0]!.context!
+    expect(Array.from(got.sessionTitle!).length).toBeLessThanOrEqual(CONTEXT_LIMITS.title)
+    // A whole-word prefix: never "word1" left over from "word17".
+    expect(words.startsWith(`${got.sessionTitle!} `)).toBe(true)
+    expect(got.eventName).toBe(got.sessionTitle)
+  })
+
+  it('takes the delimiters of the instruction clauses out of the text', async () => {
+    const { mint, calls } = stubMint()
+    const context = {
+      sessionTitle: 'The "future" of “football”',
+      speakers: ['Emiliano Martinez — Aston Villa, goalkeeper; Lionel Messi'],
+      glossary: ['Lionel Messi, Julián Álvarez; sqrDAO、EMpower'],
+    }
+    expect((await handleTokenRequest({ ...ok, body: { target: 'vi', context }, mint })).status).toBe(200)
+    expect(calls[0]!.context).toEqual({
+      sessionTitle: "The 'future' of 'football'",
+      // A comma stays inside a speaker; a semicolon (the clause's joiner) splits.
+      speakers: ['Emiliano Martinez — Aston Villa, goalkeeper', 'Lionel Messi'],
+      glossary: ['Lionel Messi', 'Julián Álvarez', 'sqrDAO', 'EMpower'],
+    })
+  })
+
+  it('refuses a payload past the raw ceiling before cleaning it', async () => {
+    const { mint, calls } = stubMint()
+    for (const context of [
+      { sessionTitle: 'x'.repeat(CONTEXT_CEILING.chars + 1) },
+      { glossary: Array(CONTEXT_CEILING.items + 1).fill('a') },
+      { speakers: ['y'.repeat(CONTEXT_CEILING.chars + 1)] },
+    ]) {
+      expect((await handleTokenRequest({ ...ok, body: { target: 'vi', context }, mint })).status).toBe(400)
+    }
+    expect(calls).toHaveLength(0)
   })
 
   it('cuts by code point, never through a surrogate pair', async () => {

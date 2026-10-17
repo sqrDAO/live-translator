@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CONTEXT_LIMITS,
   SESSION_DETAILS_STORAGE_KEY,
   detailsContext,
   detailsSummary,
+  limitsText,
   saveDetails,
   storedDetails,
 } from '../src/session-details'
@@ -16,32 +18,56 @@ function memory(initial: string | null = null) {
         if (key === SESSION_DETAILS_STORAGE_KEY) value = next
       },
     }),
-    read: () => value,
   }
 }
 
+const blank = { title: '', speakers: '', glossary: '' }
+
 describe('detailsContext', () => {
-  it('splits speakers on lines and names on lines or commas', () => {
+  it('only splits lines: trimming, blanks, repeats and commas are the server\'s', () => {
     expect(
       detailsContext({
         title: '  Football panel ',
-        speakers: 'Emiliano Martinez — Aston Villa, goalkeeper\n\n  Lionel Messi  \r\n',
-        glossary: 'Julián Álvarez, sqrDAO\nEMpower，Da Nang、W3BS,,',
+        speakers: 'Emiliano Martinez — Aston Villa\n\n Lionel Messi ',
+        glossary: 'Julián Álvarez, sqrDAO\nsqrDAO',
       }),
     ).toEqual({
-      sessionTitle: 'Football panel',
-      speakers: ['Emiliano Martinez — Aston Villa, goalkeeper', 'Lionel Messi'],
-      glossary: ['Julián Álvarez', 'sqrDAO', 'EMpower', 'Da Nang', 'W3BS'],
+      sessionTitle: '  Football panel ',
+      speakers: ['Emiliano Martinez — Aston Villa', '', ' Lionel Messi '],
+      glossary: ['Julián Álvarez, sqrDAO', 'sqrDAO'],
     })
   })
 
-  it('is null when every field is blank, so no context is sent', () => {
-    // An empty context object would still change the pinned instruction.
-    expect(detailsContext({ title: ' ', speakers: '\n\n', glossary: ' , ,' })).toBeNull()
+  it('is null when every field is whitespace', () => {
+    expect(detailsContext({ title: ' ', speakers: '\n\n', glossary: ' ' })).toBeNull()
+  })
+})
+
+describe('detailsSummary', () => {
+  it('reports what the server will use, after its own splitting and dedupe', () => {
+    expect(detailsSummary(blank)).toBe('none')
+    expect(detailsSummary({ title: 'T', speakers: 'a\n\na', glossary: 'x, y\ny' })).toBe('title · 1 speaker · 2 names')
   })
 
-  it('omits the fields that are blank', () => {
-    expect(detailsContext({ title: '', speakers: '', glossary: 'Messi' })).toEqual({ glossary: ['Messi'] })
+  it('says how many names will not be used, never more than the cap', () => {
+    const names = Array.from({ length: CONTEXT_LIMITS.glossary + 3 }, (_, i) => `Name ${i}`).join('\n')
+    const tooLong = 'x'.repeat(CONTEXT_LIMITS.term + 1)
+    expect(detailsSummary({ ...blank, glossary: `${names}\n${tooLong}` })).toBe(
+      `${CONTEXT_LIMITS.glossary} names (4 not used)`,
+    )
+    // Only an over-long name: nothing used, but not "none" either.
+    expect(detailsSummary({ ...blank, glossary: tooLong })).toBe('0 names (1 not used)')
+  })
+
+  it('warns when a paste is past what the server will accept at all', () => {
+    expect(detailsSummary({ ...blank, glossary: 'a\n'.repeat(5_000) })).toMatch(/too long/)
+  })
+})
+
+describe('limitsText', () => {
+  it('is written from the shared limits', () => {
+    const text = limitsText()
+    for (const n of Object.values(CONTEXT_LIMITS)) expect(text).toContain(String(n))
   })
 })
 
@@ -54,7 +80,6 @@ describe('storedDetails / saveDetails', () => {
   })
 
   it('treats missing, corrupt or unreadable storage as blanks', () => {
-    const blank = { title: '', speakers: '', glossary: '' }
     expect(storedDetails(memory().storage)).toEqual(blank)
     expect(storedDetails(memory('{not json').storage)).toEqual(blank)
     expect(storedDetails(memory('{"title":7,"glossary":"g"}').storage)).toEqual({ ...blank, glossary: 'g' })
@@ -67,12 +92,5 @@ describe('storedDetails / saveDetails', () => {
       setItem: () => { throw new Error('quota') },
     })
     expect(() => saveDetails(refusing, { title: 'T', speakers: '', glossary: '' })).not.toThrow()
-  })
-})
-
-describe('detailsSummary', () => {
-  it('names what is set', () => {
-    expect(detailsSummary(null)).toBe('none')
-    expect(detailsSummary({ sessionTitle: 'T', speakers: ['a'], glossary: ['x', 'y'] })).toBe('title · 1 speaker · 2 names')
   })
 })
