@@ -482,6 +482,87 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* Session details. Collapsed by default and quiet like the account line: it
+   is set once before a session, not touched during one. Open, it is the
+   gate form's field set — mono gold labels over page-canvas wells. */
+.details {
+  width: min(480px, 100%);
+  margin: 0 auto;
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+}
+
+.details summary {
+  text-align: center;
+  font-family: var(--font-label-font-family);
+  font-weight: var(--font-label-font-weight);
+  font-size: 0.62rem;
+  letter-spacing: var(--font-label-letter-spacing);
+  text-transform: var(--font-label-text-transform);
+  color: var(--color-gold-ink);
+  cursor: pointer;
+  padding-bottom: var(--spacing-xs);
+}
+
+.details-state {
+  color: var(--ink-faint);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.details-state::before {
+  content: '· ';
+}
+
+.details-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  padding-bottom: var(--spacing-sm);
+}
+
+.details-body label {
+  font-family: var(--font-label-font-family);
+  font-weight: var(--font-label-font-weight);
+  font-size: 0.62rem;
+  letter-spacing: var(--font-label-letter-spacing);
+  text-transform: var(--font-label-text-transform);
+  color: var(--color-gold-ink);
+  opacity: 0.85;
+  margin-top: var(--spacing-xs);
+}
+
+.details-body input,
+.details-body textarea {
+  padding: var(--spacing-xs) 12px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: var(--component-button-radius);
+  color: var(--color-text-primary);
+  font: inherit;
+  /* 16px: anything smaller makes iOS Safari zoom the page on focus. */
+  font-size: 1rem;
+  resize: vertical;
+  transition: var(--component-button-transition);
+}
+
+.details-body input:hover,
+.details-body input:focus,
+.details-body textarea:hover,
+.details-body textarea:focus {
+  border-color: var(--color-text-secondary);
+}
+
+.details-body input::placeholder,
+.details-body textarea::placeholder {
+  color: var(--ink-faint);
+}
+
+.details-help {
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+}
+
 .link-button {
   appearance: none;
   padding: 0;

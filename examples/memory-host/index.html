@@ -171,6 +171,28 @@
           <button type="button" class="link-button" id="requests-open" hidden>Requests</button>
           <button type="button" class="link-button" id="signout">Sign out</button>
         </p>
+        <!-- Programme context for the model. The glossary is what keeps names
+             in the speaker's own transcript (probed 2026-10-17), and like the
+             direction it is pinned into each token, so an edit applies to the
+             next start, not the running feed. Limits match api/_context.ts. -->
+        <details class="details" id="session-details">
+          <summary>Session details <span class="details-state" id="details-state">none</span></summary>
+          <div class="details-body">
+            <label for="details-title">Session title</label>
+            <input id="details-title" type="text" maxlength="120" autocomplete="off" spellcheck="false" />
+            <label for="details-speakers">Speakers · one per line</label>
+            <textarea id="details-speakers" rows="2" maxlength="1400" spellcheck="false"
+              placeholder="Emiliano Martinez — Aston Villa"></textarea>
+            <label for="details-glossary">Names &amp; terms · one per line or comma-separated</label>
+            <textarea id="details-glossary" rows="2" maxlength="4000" spellcheck="false"
+              placeholder="Lionel Messi, Julián Álvarez, sqrDAO"></textarea>
+            <p class="details-help">
+              Helps the model spell these names as written, in the original line and the
+              translation. Saved in this browser. Changes apply the next time you start, not to a
+              running feed. Up to 10 speakers and 50 names; longer lists are cut.
+            </p>
+          </div>
+        </details>
         <div class="controls">
           <select id="device" class="mic-select" aria-label="Microphone"></select>
           <button class="mic" id="mic" aria-label="Start translating">

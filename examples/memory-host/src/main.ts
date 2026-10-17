@@ -7,6 +7,7 @@ import {
   type LangTag,
   type LanguagePack,
   type LatencyReport,
+  type LiveSessionContext,
   type MintToken,
   type TokenGrant,
 } from '@sqrdao/live-translate'
@@ -35,6 +36,7 @@ import {
   type AuthState,
 } from './auth'
 import { MemorySink, type StoredUtterance } from './memory-sink'
+import { detailsContext, detailsSummary, saveDetails, storedDetails } from './session-details'
 import { bindThemeToggle } from './theme'
 import { TranscriptHistory, TranscriptArchive, TRANSCRIPT_PREFIX, TRANSCRIPT_DELETE_PREFIX, transcriptText, type TranscriptRecorder, type TranscriptSession } from './transcript-history'
 
@@ -75,6 +77,16 @@ let pairId = rememberedPair()
 let speakerLang: LangTag | null = null
 
 /**
+ * The programme context this run's tokens carry, snapshotted at `start()`.
+ *
+ * A snapshot, not a live read of the fields: the engine re-mints on every
+ * reconnect, and a feed whose reconnects picked up a half-typed edit would
+ * have its two sessions pinned to different instructions. Edits wait for the
+ * next start, and the help text says so.
+ */
+let runContext: LiveSessionContext | null = null
+
+/**
  * The host's authorization hook. The engine calls it once per target at
  * start and again on every reconnect (tokens are single-use). It hits the
  * host's own endpoint; the API key never reaches this code.
@@ -89,8 +101,14 @@ const mintToken: MintToken = async (target): Promise<TokenGrant> => {
     // The declared direction travels with every mint, including the ones the
     // engine makes on reconnect: the session prompt is pinned into the token,
     // so a reconnect that forgot it would silently return that half of the
-    // feed to Auto mid-session.
-    body: JSON.stringify({ pair: pairId, target, ...(speakerLang ? { speakerLang } : {}) }),
+    // feed to Auto mid-session. The context rides along for the same reason:
+    // a reconnect without it would quietly lose the glossary.
+    body: JSON.stringify({
+      pair: pairId,
+      target,
+      ...(speakerLang ? { speakerLang } : {}),
+      ...(runContext ? { context: runContext } : {}),
+    }),
   })
   if (!response.ok) {
     // Signed out elsewhere, or access withdrawn since sign-in: no reconnect
@@ -482,6 +500,7 @@ function start(): void {
   // utterance; with a declared direction it is told, and so is the model.
   wire = freshWire()
   lastLatency = null
+  runContext = currentDetailsContext()
   const runRecorder = archive.begin(speakerLang)
   recorder = runRecorder
   const sink = new MemorySink({
@@ -613,6 +632,32 @@ function restartIfRunning(): void {
 pairSel.value = pairId
 buildDirectionButtons()
 renderDirection()
+
+// --- Session details ---------------------------------------------------------
+// Saved on every keystroke, read at start (see `runContext`).
+const detailsTitle = $<HTMLInputElement>('#details-title')
+const detailsSpeakers = $<HTMLTextAreaElement>('#details-speakers')
+const detailsGlossary = $<HTMLTextAreaElement>('#details-glossary')
+const detailsState = $('#details-state')
+
+function currentDetailsContext(): LiveSessionContext | null {
+  return detailsContext({ title: detailsTitle.value, speakers: detailsSpeakers.value, glossary: detailsGlossary.value })
+}
+
+const remembered = storedDetails(() => window.localStorage)
+detailsTitle.value = remembered.title
+detailsSpeakers.value = remembered.speakers
+detailsGlossary.value = remembered.glossary
+detailsState.textContent = detailsSummary(currentDetailsContext())
+
+$('#session-details').addEventListener('input', () => {
+  saveDetails(() => window.localStorage, {
+    title: detailsTitle.value,
+    speakers: detailsSpeakers.value,
+    glossary: detailsGlossary.value,
+  })
+  detailsState.textContent = detailsSummary(currentDetailsContext())
+})
 
 // --- Sign-in -----------------------------------------------------------------
 // The server is the gate (`/api/token` mints for approved callers only); this
