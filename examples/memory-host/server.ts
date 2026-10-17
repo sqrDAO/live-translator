@@ -1,10 +1,10 @@
 /**
  * The reference host's token endpoint. Node only.
  *
- * This is the whole of the host's server responsibility: key in, token out.
- * A real host adds its own answers to "who may mint" and "what programme
- * context primes the model" around this call — this example answers neither,
- * because they are the host's to answer, not the engine's.
+ * Key in, token out — for a signed-in, approved caller only. "Who may mint"
+ * is answered by `api/_auth.ts` (Firebase sign-in, admin-approved requests),
+ * shared with the deployed functions so the two cannot disagree. "What
+ * programme context primes the model" is still left unanswered here.
  */
 
 import 'dotenv/config'
@@ -19,6 +19,8 @@ import {
   mintSessionToken,
 } from '@sqrdao/live-translate/server'
 import type { LangTag, LanguagePack } from '@sqrdao/live-translate/server'
+
+import { authorize, handleRequestsRequest, handleSessionRequest } from '../../api/_auth.js'
 
 const PORT = Number(process.env.PORT ?? 3001)
 const MODEL = process.env.GEMINI_LIVE_MODEL ?? 'gemini-3.5-live-translate-preview'
@@ -37,7 +39,31 @@ const PACKS: Readonly<Record<string, LanguagePack>> = { 'en-vi': enVi, 'en-zh': 
 const app = express()
 app.use(express.json())
 
+const authRequest = (req: express.Request) => ({
+  authorization: req.headers.authorization,
+  host: req.headers.host ?? null,
+  developmentEnvironment,
+})
+
+app.all('/api/session', async (req, res) => {
+  const result = await handleSessionRequest({ ...authRequest(req), method: req.method, env: process.env })
+  res.setHeader('Cache-Control', 'no-store')
+  res.status(result.status).json(result.body)
+})
+
+app.all('/api/requests', async (req, res) => {
+  const result = await handleRequestsRequest({ ...authRequest(req), method: req.method, body: req.body, env: process.env })
+  res.setHeader('Cache-Control', 'no-store')
+  res.status(result.status).json(result.body)
+})
+
 app.post('/api/token', async (req, res) => {
+  const authorization = await authorize(authRequest(req), process.env)
+  if (!authorization.ok) {
+    res.status(authorization.status).json({ error: authorization.error })
+    return
+  }
+
   const pairId: unknown = req.body?.pair ?? 'en-vi'
   const languages = typeof pairId === 'string' && Object.hasOwn(PACKS, pairId) ? PACKS[pairId]! : null
   if (!languages) {

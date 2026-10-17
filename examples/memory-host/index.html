@@ -41,8 +41,51 @@
       }
     </script>
   </head>
-  <body>
+  <!-- `data-auth`: pending until sign-in state is known, then `in`, `out`,
+       `unverified` (email link not yet clicked), `waiting` (request filed,
+       not yet approved) or `denied`.
+       Only `in` shows the stage; the server refuses to mint either way, so
+       this is presentation, not the gate itself. -->
+  <body data-auth="pending">
     <a class="skip" href="#feed">Skip to transcript</a>
+    <section class="gate" id="gate" aria-labelledby="gate-title">
+      <img class="logo logo-dark" src="/brand/sqrdao-hor-white.svg" alt="sqrDAO" width="3930" height="670" />
+      <img class="logo logo-light" src="/brand/sqrdao-hor-black.svg" alt="sqrDAO" width="858" height="146" />
+      <h1 class="wordmark" id="gate-title">Phiên&nbsp;dịch <em>live</em></h1>
+      <!-- Text and buttons follow the state main.ts sets: signed out, waiting
+           for an admin to approve the request, or declined. -->
+      <p class="gate-vi" id="gate-vi">Đăng nhập để sử dụng</p>
+      <p class="gate-en eyebrow" id="gate-en">approved accounts only</p>
+      <div class="gate-actions">
+        <button type="button" class="history-button gate-primary" id="gate-signin">Sign in with Google</button>
+        <button type="button" class="history-button gate-primary" id="gate-recheck" hidden>Check again</button>
+        <button type="button" class="history-button" id="gate-resend" hidden>Resend link</button>
+        <button type="button" class="history-button" id="gate-switch" hidden>Use another account</button>
+      </div>
+      <!-- Email, for people without a Google account. `data-mode` is
+           `signin`, `signup` or `link`; it decides which fields show and what
+           the one submit button does, and the button's label says so. -->
+      <form class="gate-form" id="gate-form" data-mode="signin" novalidate>
+        <p class="gate-or eyebrow">hoặc · or</p>
+        <div class="gate-tabs" role="tablist" aria-label="Email sign-in method">
+          <button type="button" role="tab" id="gate-tab-password" aria-selected="true">Mật khẩu · Password</button>
+          <button type="button" role="tab" id="gate-tab-link" aria-selected="false">Liên kết · Email link</button>
+        </div>
+        <label for="gate-email">Email</label>
+        <input id="gate-email" name="email" type="email" autocomplete="email" required />
+        <div class="gate-password-field">
+          <label for="gate-password">Mật khẩu · Password</label>
+          <input id="gate-password" name="password" type="password" autocomplete="current-password" minlength="8" required />
+        </div>
+        <p class="gate-hint" id="gate-hint"></p>
+        <button type="submit" class="history-button gate-primary" id="gate-submit">Sign in</button>
+        <div class="gate-links">
+          <button type="button" class="link-button" id="gate-toggle">Chưa có tài khoản? · Create an account</button>
+          <button type="button" class="link-button" id="gate-forgot">Quên mật khẩu? · Forgot password?</button>
+        </div>
+      </form>
+      <p class="gate-error" id="gate-error" role="alert" hidden></p>
+    </section>
     <div class="stage">
       <header class="top">
         <div class="brand">
@@ -122,6 +165,12 @@
              wrong input device is indistinguishable from a broken session:
              both read "đang dịch" and publish nothing. -->
         <p class="diag" id="diag" hidden></p>
+        <p class="account" id="account" hidden>
+          <span id="account-email"></span>
+          <!-- Admins only: the pending count rides in the label. -->
+          <button type="button" class="link-button" id="requests-open" hidden>Requests</button>
+          <button type="button" class="link-button" id="signout">Sign out</button>
+        </p>
         <div class="controls">
           <select id="device" class="mic-select" aria-label="Microphone"></select>
           <button class="mic" id="mic" aria-label="Start translating">
@@ -156,6 +205,15 @@
         <button type="button" class="history-button" id="history-delete">Delete session</button>
       </div>
       <pre id="history-transcript"></pre>
+    </dialog>
+    <dialog id="requests-dialog" role="dialog" aria-labelledby="requests-title">
+      <div class="history-heading">
+        <h2 id="requests-title">Access requests</h2>
+        <button type="button" class="history-button" id="requests-close">Close</button>
+      </div>
+      <p>Approve someone and they can start translating at once; deny them and they cannot ask again.</p>
+      <p id="requests-error" role="alert" hidden></p>
+      <ul class="requests-list" id="requests-list"></ul>
     </dialog>
     <script type="module" src="/src/main.ts"></script>
   </body>

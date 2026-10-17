@@ -469,6 +469,216 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* Who is signed in, and the way out. Quiet: it is account chrome, not part
+   of the feed. */
+.account {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: var(--spacing-sm);
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  padding-bottom: var(--spacing-xs);
+  overflow-wrap: anywhere;
+}
+
+.link-button {
+  appearance: none;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--color-gold-ink);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* ── sign-in gate ───────────────────────────────────────────────────────────
+   The stage is shown only once the server says who is signed in; until then
+   the page is either this gate or blank (`pending`), never a working-looking
+   app whose mic would only fail at mint. */
+body:not([data-auth='in']) .stage {
+  display: none;
+}
+
+.gate {
+  display: none;
+  min-height: 100dvh;
+  max-width: 420px;
+  margin: 0 auto;
+  padding: var(--spacing-lg) var(--spacing-md);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  animation: fadeDown 0.6s ease-out both;
+}
+
+body:not([data-auth='in']):not([data-auth='pending']) .gate {
+  display: flex;
+}
+
+.gate .wordmark {
+  margin-bottom: var(--spacing-lg);
+}
+
+.gate-vi {
+  font-size: 1.35rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.gate-en {
+  font-size: 0.62rem;
+  margin-top: var(--spacing-sm);
+}
+
+.gate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-lg);
+}
+
+/* Two classes: `.history-button` is declared later and would win a tie. */
+.gate-actions .gate-primary,
+.gate-form .gate-primary {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.gate-actions [hidden] {
+  display: none;
+}
+
+.gate-form {
+  display: none;
+  width: min(320px, 100%);
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--spacing-xs);
+  text-align: left;
+}
+
+/* Only while signed out: every other gate state already has an account. */
+body[data-auth='out'] .gate-form {
+  display: flex;
+}
+
+.gate-or {
+  text-align: center;
+  font-size: 0.62rem;
+  margin: var(--spacing-md) 0 var(--spacing-xs);
+}
+
+.gate-form label {
+  font-family: var(--font-label-font-family);
+  font-weight: var(--font-label-font-weight);
+  font-size: 0.62rem;
+  letter-spacing: var(--font-label-letter-spacing);
+  text-transform: var(--font-label-text-transform);
+  color: var(--color-gold-ink);
+  opacity: 0.85;
+  margin-top: var(--spacing-xs);
+}
+
+/* Same well as the history picker: page canvas inside, hairline, 8px. */
+.gate-form input {
+  padding: var(--spacing-sm) 12px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: var(--component-button-radius);
+  color: var(--color-text-primary);
+  font: inherit;
+  /* 16px: anything smaller makes iOS Safari zoom the page on focus. */
+  font-size: 1rem;
+  transition: var(--component-button-transition);
+}
+
+.gate-form input:hover,
+.gate-form input:focus {
+  border-color: var(--color-text-secondary);
+}
+
+/* Password or link: a two-way switch over the form, the chosen side filled. */
+.gate-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 3px;
+  margin-bottom: var(--spacing-xs);
+  border: 1px solid var(--color-border);
+  border-radius: var(--component-button-radius);
+}
+
+.gate-tabs button {
+  appearance: none;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: none;
+  border: none;
+  border-radius: calc(var(--component-button-radius) - 3px);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--component-button-transition);
+}
+
+.gate-tabs button[aria-selected='true'] {
+  background: var(--component-chip-background);
+  color: var(--color-text-primary);
+}
+
+.gate-password-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.gate-hint {
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+}
+
+.gate-hint:empty {
+  display: none;
+}
+
+.gate-form #gate-submit {
+  margin-top: var(--spacing-sm);
+}
+
+.gate-links {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-xs);
+  margin-top: var(--spacing-sm);
+}
+
+.gate-links .link-button {
+  font-size: 0.78rem;
+}
+
+/* The link needs only the address; signing up needs no reset link. */
+.gate-form[data-mode='link'] .gate-password-field,
+.gate-form[data-mode='link'] .gate-links,
+.gate-form[data-mode='signup'] #gate-forgot {
+  display: none;
+}
+
+.gate-error {
+  margin-top: var(--spacing-md);
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+  border-left: 3px solid var(--warn-fill);
+  padding-left: var(--spacing-sm);
+  text-align: left;
+}
+
 .controls {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -676,7 +886,8 @@ body {
 /* ── history dialog ─────────────────────────────────────────────────────────
    A modal: card surface at the 16px modal radius, lifted with the system's
    float shadow — the one place off the feed that is allowed elevation at rest. */
-#history-dialog {
+#history-dialog,
+#requests-dialog {
   margin: auto;
   width: min(680px, calc(100vw - 2 * var(--spacing-md)));
   max-height: 85dvh;
@@ -690,16 +901,19 @@ body {
   animation: fadeDown 0.35s ease-out both;
 }
 
-#history-dialog::backdrop {
+#history-dialog::backdrop,
+#requests-dialog::backdrop {
   background: color-mix(in srgb, var(--color-black) 65%, transparent);
 }
 
 /* Also usable as a non-modal panel on browsers without native dialog support. */
-#history-dialog:not([open]) {
+#history-dialog:not([open]),
+#requests-dialog:not([open]) {
   display: none;
 }
 
-#history-dialog[open] {
+#history-dialog[open],
+#requests-dialog[open] {
   position: fixed;
   inset: 0;
   height: fit-content;
@@ -714,14 +928,16 @@ body {
   margin-bottom: var(--spacing-sm);
 }
 
-#history-title {
+#history-title,
+#requests-title {
   font-family: var(--font-heading-font-family);
   font-weight: var(--font-heading-font-weight);
   font-size: 1.25rem;
   line-height: 1.2;
 }
 
-#history-dialog p {
+#history-dialog p,
+#requests-dialog p {
   font-size: 0.875rem;
   color: var(--color-text-secondary);
   margin-bottom: var(--spacing-md);
@@ -857,7 +1073,8 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #history-dialog {
+  #history-dialog,
+#requests-dialog {
     animation: none;
   }
 
@@ -866,5 +1083,72 @@ body {
   .history-button,
   #history-session {
     transition: none;
+  }
+}
+
+/* ── access requests (admins) ───────────────────────────────────────────────
+   One row per person: who, when, where they stand, and the two decisions.
+   Pending rows lead; a decided row keeps its other action so a mistake can be
+   reversed from the same place. */
+.requests-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.request {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--spacing-xs) var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--component-button-radius);
+}
+
+.request[data-status='pending'] {
+  border-color: var(--color-accent);
+}
+
+.request-who {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+}
+
+.request-who strong {
+  display: block;
+  font-weight: 600;
+}
+
+#requests-dialog .request-meta {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+}
+
+.request-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.request-actions .history-button {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 0.78rem;
+}
+
+.request-actions .approve {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+#requests-dialog .requests-empty {
+  text-align: center;
+}
+
+@media (max-width: 460px) {
+  .request {
+    grid-template-columns: 1fr;
   }
 }

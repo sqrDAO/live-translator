@@ -1,0 +1,64 @@
+rules_version = '2';
+
+// Access requests for the deployed host (api/_auth.ts).
+//
+// `users/{uid}` holds one person's access: `status` is `pending`, `approved`
+// or `denied`. A person may read their own record and create it once, as
+// `pending`. Only an admin may change it, and the change records who decided
+// and when. The server reads and writes these with the caller's own ID token,
+// so these rules — not the page, not the server — are what stop anyone
+// approving themselves.
+//
+// `config/admins.emails` lists the admins, lowercased. It is edited in the
+// Firebase console only (the console bypasses these rules), so adding or
+// removing an admin needs no deploy.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedInEmail() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email is string;
+    }
+
+    function isAdmin() {
+      return signedInEmail()
+        && request.auth.token.email.lower() in get(/databases/$(database)/documents/config/admins).data.emails;
+    }
+
+    match /config/admins {
+      // Read by the server, as the caller, to learn whether they are an admin.
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /users/{uid} {
+      allow read: if (request.auth != null && request.auth.uid == uid) || isAdmin();
+
+      // A verified email only: with email/password sign-up anyone can claim
+      // any address, and the admin decides by the address shown.
+      allow create: if signedInEmail()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['email', 'name', 'status', 'requestedAt'])
+        && request.resource.data.status == 'pending'
+        && request.resource.data.email == request.auth.token.email.lower()
+        && request.resource.data.requestedAt is timestamp
+        && (!('name' in request.resource.data) || request.resource.data.name is string);
+
+      // An admin's decision: the status, plus who made it and when — nothing
+      // else about the request can be rewritten.
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'decidedBy', 'decidedAt'])
+        && request.resource.data.status in ['pending', 'approved', 'denied']
+        && request.resource.data.decidedBy == request.auth.token.email.lower()
+        && request.resource.data.decidedAt == request.time;
+
+      // A request cannot be withdrawn and recreated, which would let someone
+      // who was denied queue up again.
+      allow delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

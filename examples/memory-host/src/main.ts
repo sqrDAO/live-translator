@@ -14,6 +14,26 @@ import { enVi } from '@sqrdao/live-translate/lang/en-vi'
 import { enZh } from '@sqrdao/live-translate/lang/en-zh'
 import { viZh } from '@sqrdao/live-translate/lang/vi-zh'
 
+import {
+  arrivedWithSignInLink,
+  authErrorMessage,
+  decide,
+  finishSignInLink,
+  idToken,
+  listRequests,
+  recheck,
+  rememberedLinkEmail,
+  resendVerification,
+  resetPassword,
+  sendSignInLink,
+  signIn,
+  signInWithEmail,
+  signOut,
+  signUpWithEmail,
+  watchAuth,
+  type AccessRequest,
+  type AuthState,
+} from './auth'
 import { MemorySink, type StoredUtterance } from './memory-sink'
 import { bindThemeToggle } from './theme'
 import { TranscriptHistory, TranscriptArchive, TRANSCRIPT_PREFIX, TRANSCRIPT_DELETE_PREFIX, transcriptText, type TranscriptRecorder, type TranscriptSession } from './transcript-history'
@@ -60,9 +80,12 @@ let speakerLang: LangTag | null = null
  * host's own endpoint; the API key never reaches this code.
  */
 const mintToken: MintToken = async (target): Promise<TokenGrant> => {
+  // Fetched per mint: Firebase refreshes it near its one-hour expiry, so a
+  // reconnect late in a long feed still presents a current one.
+  const bearer = await idToken()
   const response = await fetch('/api/token', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
     // The declared direction travels with every mint, including the ones the
     // engine makes on reconnect: the session prompt is pinned into the token,
     // so a reconnect that forgot it would silently return that half of the
@@ -70,6 +93,12 @@ const mintToken: MintToken = async (target): Promise<TokenGrant> => {
     body: JSON.stringify({ pair: pairId, target, ...(speakerLang ? { speakerLang } : {}) }),
   })
   if (!response.ok) {
+    // Signed out elsewhere, or access withdrawn since sign-in: no reconnect
+    // will succeed, so send the person back to the gate rather than leaving a
+    // dead feed that reads "mất kết nối".
+    if (response.status === 401 || response.status === 403) {
+      void recheck().then(showAuth, showAuthError)
+    }
     const detail = await response.text().catch(() => '')
     throw new Error(`token endpoint HTTP ${response.status} ${detail}`.trim())
   }
@@ -584,3 +613,322 @@ function restartIfRunning(): void {
 pairSel.value = pairId
 buildDirectionButtons()
 renderDirection()
+
+// --- Sign-in -----------------------------------------------------------------
+// The server is the gate (`/api/token` mints for approved callers only); this
+// decides which screen to show. First sign-in files an access request, which
+// an admin approves in the Firebase console.
+const gateVi = $('#gate-vi')
+const gateEn = $('#gate-en')
+const gateError = $('#gate-error')
+const signInBtn = $<HTMLButtonElement>('#gate-signin')
+const recheckBtn = $<HTMLButtonElement>('#gate-recheck')
+const switchBtn = $<HTMLButtonElement>('#gate-switch')
+const resendBtn = $<HTMLButtonElement>('#gate-resend')
+const gateForm = $<HTMLFormElement>('#gate-form')
+const emailInput = $<HTMLInputElement>('#gate-email')
+const passwordInput = $<HTMLInputElement>('#gate-password')
+const submitBtn = $<HTMLButtonElement>('#gate-submit')
+const toggleBtn = $<HTMLButtonElement>('#gate-toggle')
+const gateHint = $('#gate-hint')
+const passwordTab = $<HTMLButtonElement>('#gate-tab-password')
+const linkTab = $<HTMLButtonElement>('#gate-tab-link')
+/** Set on the return trip from an emailed link whose address must be re-entered. */
+let finishingLink = false
+const accountEl = $('#account')
+const accountEmail = $('#account-email')
+const signOutBtn = $<HTMLButtonElement>('#signout')
+
+function showGateError(message: string | null): void {
+  gateError.textContent = message ?? ''
+  gateError.hidden = !message
+}
+
+function showAuthError(error: unknown): void {
+  showGateError(authErrorMessage(error))
+}
+
+/** The gate's wording per state: Vietnamese first, English beneath, as elsewhere. */
+const GATE_TEXT = {
+  out: ['Đăng nhập để sử dụng', 'approved accounts only'],
+  unverified: ['Xác nhận email', 'open the link we emailed you, then check again'],
+  waiting: ['Đang chờ duyệt', 'access requested · an admin will approve it'],
+  denied: ['Không có quyền truy cập', 'access was not approved'],
+} as const
+
+function showAuth(state: AuthState): void {
+  // Firebase reports "signed out" as it starts, which would otherwise wipe
+  // the prompt to re-enter the email a link was sent to.
+  if (!finishingLink) showGateError(null)
+  if (state.kind === 'signed-in' && state.access === 'approved') {
+    document.body.dataset.auth = 'in'
+    accountEmail.textContent = state.dev ? `${state.email} · development, no sign-in` : state.email
+    // The development user has no session to end.
+    signOutBtn.hidden = Boolean(state.dev)
+    requestsOpenBtn.hidden = !state.admin
+    accountEl.hidden = false
+    if (state.admin) void refreshRequests()
+    return
+  }
+  if (requestsDialog.open) requestsDialog.close()
+  if (running) void stop()
+  accountEl.hidden = true
+  const gate =
+    state.kind === 'signed-out'
+      ? 'out'
+      : state.access === 'denied'
+        ? 'denied'
+        : state.access === 'unverified'
+          ? 'unverified'
+          : 'waiting'
+  document.body.dataset.auth = gate
+  gateVi.textContent = GATE_TEXT[gate][0]
+  gateEn.textContent = state.kind === 'signed-in' ? `${state.email} · ${GATE_TEXT[gate][1]}` : GATE_TEXT[gate][1]
+  signInBtn.hidden = gate !== 'out'
+  recheckBtn.hidden = gate !== 'waiting' && gate !== 'unverified'
+  resendBtn.hidden = gate !== 'unverified'
+  switchBtn.hidden = gate === 'out'
+}
+
+// Each sign-in path's resulting state arrives through `watchAuth`.
+signInBtn.addEventListener('click', () => {
+  showGateError(null)
+  signIn().catch(showAuthError)
+})
+
+type FormMode = 'signin' | 'signup' | 'link'
+
+/**
+ * Shows one way in at a time. The fields, the hint and the submit button's
+ * label all follow the mode, so the button always says what it will do.
+ */
+function setFormMode(mode: FormMode): void {
+  gateForm.dataset.mode = mode
+  passwordTab.setAttribute('aria-selected', String(mode !== 'link'))
+  linkTab.setAttribute('aria-selected', String(mode === 'link'))
+  // Lets password managers offer to save a new password, or fill a saved one.
+  passwordInput.autocomplete = mode === 'signup' ? 'new-password' : 'current-password'
+  submitBtn.textContent = {
+    signin: 'Đăng nhập · Sign in',
+    signup: 'Tạo tài khoản · Create account',
+    link: finishingLink ? 'Hoàn tất · Finish sign-in' : 'Gửi liên kết · Email me a sign-in link',
+  }[mode]
+  toggleBtn.textContent = mode === 'signup' ? 'Đã có tài khoản? · Sign in instead' : 'Chưa có tài khoản? · Create an account'
+  gateHint.textContent = {
+    signin: '',
+    signup: 'At least 8 characters. We will email you a link to confirm the address.',
+    link: 'No password: we email you a one-time link that signs you in.',
+  }[mode]
+  showGateError(null)
+}
+
+function formMode(): FormMode {
+  const mode = gateForm.dataset.mode
+  return mode === 'signup' || mode === 'link' ? mode : 'signin'
+}
+
+passwordTab.addEventListener('click', () => setFormMode('signin'))
+linkTab.addEventListener('click', () => setFormMode('link'))
+toggleBtn.addEventListener('click', () => setFormMode(formMode() === 'signup' ? 'signin' : 'signup'))
+
+/** Disables the form while `work` runs; logs and shows any failure. */
+function busy(work: Promise<unknown>): void {
+  const buttons = gateForm.querySelectorAll<HTMLButtonElement>('button')
+  for (const button of buttons) button.disabled = true
+  work
+    .catch((error: unknown) => {
+      // The code (e.g. auth/email-already-in-use) is what to look for when a
+      // sign-in "does nothing".
+      console.error('[sign-in]', error)
+      showAuthError(error)
+    })
+    .finally(() => {
+      for (const button of buttons) button.disabled = false
+    })
+}
+
+gateForm.addEventListener('submit', (event) => {
+  event.preventDefault()
+  const mode = formMode()
+  const email = emailInput.value.trim()
+  const password = passwordInput.value
+  if (!email) {
+    showGateError('Nhập email · Enter your email address.')
+    emailInput.focus()
+    return
+  }
+  if (mode === 'link') {
+    showGateError(null)
+    busy(
+      finishingLink
+        ? finishSignInLink(email).then(() => {
+            finishingLink = false
+            setFormMode('link')
+          })
+        : sendSignInLink(email).then(() =>
+            showGateError(`Đã gửi liên kết đến ${email} · A sign-in link is on its way to ${email}. Open it in this browser.`),
+          ),
+    )
+    return
+  }
+  if (!password) {
+    showGateError('Nhập mật khẩu · Enter your password.')
+    passwordInput.focus()
+    return
+  }
+  if (mode === 'signup' && password.length < 8) {
+    showGateError('Mật khẩu quá yếu · Password too weak — use at least 8 characters.')
+    passwordInput.focus()
+    return
+  }
+  showGateError(null)
+  busy((mode === 'signup' ? signUpWithEmail(email, password) : signInWithEmail(email, password)).then(() => (passwordInput.value = '')))
+})
+
+/**
+ * The return trip from an emailed link: finish at once when this browser sent
+ * it, otherwise ask for the address — the link is only good with it.
+ */
+function resumeSignInLink(): void {
+  if (!arrivedWithSignInLink()) return
+  const email = rememberedLinkEmail()
+  if (email) {
+    busy(finishSignInLink(email))
+    return
+  }
+  finishingLink = true
+  setFormMode('link')
+  showGateError('Nhập lại email để hoàn tất · Enter the email the link was sent to, then press Finish sign-in.')
+}
+
+$('#gate-forgot').addEventListener('click', () => {
+  const email = emailInput.value.trim()
+  if (!email) {
+    showGateError('Nhập email trước · Enter your email first, then press this again.')
+    emailInput.focus()
+    return
+  }
+  busy(
+    resetPassword(email)
+      // Worded the same whether or not the account exists: with enumeration
+      // protection on, Firebase does not say, and neither should this.
+      .then(() => showGateError(`Nếu ${email} có tài khoản, liên kết đặt lại đã được gửi · If ${email} has an account, a reset link is on its way.`)),
+  )
+})
+
+resendBtn.addEventListener('click', () => {
+  resendBtn.disabled = true
+  resendVerification()
+    .then(() => showGateError('Đã gửi lại · Sent — check your inbox and spam folder.'))
+    .catch(showAuthError)
+    .finally(() => (resendBtn.disabled = false))
+})
+
+recheckBtn.addEventListener('click', () => {
+  recheckBtn.disabled = true
+  recheck()
+    .then(showAuth, showAuthError)
+    .finally(() => (recheckBtn.disabled = false))
+})
+
+for (const button of [switchBtn, signOutBtn]) {
+  button.addEventListener('click', () => {
+    void stop()
+      .then(signOut)
+      .catch(showAuthError)
+  })
+}
+
+// --- Access requests (admins) -------------------------------------------------
+// Shown only to admins, but not trusted to them: `/api/requests` and the
+// Firestore rules refuse everyone else whatever this page does.
+const requestsOpenBtn = $<HTMLButtonElement>('#requests-open')
+const requestsDialog = $<HTMLDialogElement>('#requests-dialog')
+const requestsList = $('#requests-list')
+const requestsError = $('#requests-error')
+let requests: AccessRequest[] = []
+
+function showRequestsError(message: string | null): void {
+  requestsError.textContent = message ?? ''
+  requestsError.hidden = !message
+}
+
+const STATUS_TEXT: Record<AccessRequest['status'], string> = {
+  pending: 'chờ duyệt · pending',
+  approved: 'đã duyệt · approved',
+  denied: 'từ chối · denied',
+}
+
+function when(iso: string | null): string {
+  return iso ? new Date(iso).toLocaleString() : ''
+}
+
+function renderRequests(): void {
+  const pending = requests.filter((r) => r.status === 'pending').length
+  requestsOpenBtn.textContent = pending ? `Requests (${pending})` : 'Requests'
+  // Pending first, newest first within each group (the server sends newest first).
+  const ordered = [...requests].sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending'))
+  if (!ordered.length) {
+    const li = document.createElement('li')
+    li.innerHTML = '<p class="requests-empty">No requests yet.</p>'
+    requestsList.replaceChildren(li)
+    return
+  }
+  requestsList.replaceChildren(
+    ...ordered.map((r) => {
+      const li = document.createElement('li')
+      li.className = 'request'
+      li.dataset.status = r.status
+      li.dataset.uid = r.uid
+      li.innerHTML =
+        '<div class="request-who"><strong></strong><p class="request-meta"></p></div>' +
+        '<div class="request-actions">' +
+        '<button type="button" class="history-button approve" data-decide="approved">Approve</button>' +
+        '<button type="button" class="history-button" data-decide="denied">Deny</button></div>'
+      li.querySelector('strong')!.textContent = r.name ? `${r.name} · ${r.email ?? r.uid}` : (r.email ?? r.uid)
+      const decided = r.decidedBy ? ` · ${r.decidedBy}, ${when(r.decidedAt)}` : ''
+      li.querySelector('.request-meta')!.textContent = `${STATUS_TEXT[r.status]} · asked ${when(r.requestedAt)}${decided}`
+      // A decided row keeps only the action that would reverse it.
+      for (const button of li.querySelectorAll<HTMLButtonElement>('button[data-decide]')) {
+        button.hidden = button.dataset.decide === r.status
+      }
+      return li
+    }),
+  )
+}
+
+async function refreshRequests(): Promise<void> {
+  try {
+    requests = await listRequests()
+    showRequestsError(null)
+    renderRequests()
+  } catch (error) {
+    showRequestsError(`Could not load requests: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+requestsOpenBtn.addEventListener('click', () => {
+  requestsDialog.showModal()
+  void refreshRequests()
+})
+$('#requests-close').addEventListener('click', () => requestsDialog.close())
+
+requestsList.addEventListener('click', (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-decide]')
+  const uid = button?.closest<HTMLElement>('.request')?.dataset.uid
+  if (!button || !uid) return
+  const status = button.dataset.decide as AccessRequest['status']
+  for (const b of requestsList.querySelectorAll<HTMLButtonElement>(`[data-uid="${CSS.escape(uid)}"] button`)) b.disabled = true
+  decide(uid, status)
+    .then(refreshRequests)
+    .catch((error: unknown) => {
+      showRequestsError(`Could not save that decision: ${error instanceof Error ? error.message : String(error)}`)
+      renderRequests()
+    })
+})
+
+watchAuth(showAuth, showAuthError).then(resumeSignInLink, (error: unknown) => {
+  document.body.dataset.auth = 'out'
+  signInBtn.hidden = true
+  showAuthError(error)
+})
